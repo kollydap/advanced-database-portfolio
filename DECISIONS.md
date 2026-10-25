@@ -219,6 +219,37 @@ Every chain is append-only, but not every append-only table is a chain.
 
 **Why this shape:** 3–5 experiments per portfolio, each tied to a decision above, so each can be explained from its decision.
 
+## D10. Schema, group 1: region, player, player_handle, friendship
+
+**How fragmentation is implemented (CockroachDB):**
+1. Nodes are started with `--locality=region=…`.
+2. The database is made multi-region (`PRIMARY REGION us-east`, `ADD REGION eu-west, af-west`, `SURVIVE REGION FAILURE`).
+3. Tables are declared `LOCALITY REGIONAL BY ROW` (fragmented: a hidden `crdb_region` column, one partition = one fragment per region, home copy on that region's node) or `GLOBAL` (not fragmented: full copy in every region).
+4. Each row's `crdb_region` is set on insert. Child rows take their parent's region (derived fragmentation).
+
+**Manual vs managed fragmentation.** Separate tables per region (`player_eu_west`, …) were considered. The choice is **one table partitioned by the database** (fragmentation transparency), because manual tables would break foreign keys and uniqueness across fragments, need application routing and `UNION ALL` everywhere, and triple every schema change. The textbook fragments are still created as **views** (`player_us_east`, `player_eu_west`, `player_af_west`) and used to prove completeness, reconstruction and disjointness.
+
+**Replication alongside fragmentation.**
+- Each fragment's home copy (leaseholder) is in its own region, with backup copies on the other nodes (`SURVIVE REGION FAILURE`), because there is only one node per region.
+- Reads stay local. Writes pay a cross-region quorum round trip.
+- In production: 3 nodes per region and `SURVIVE ZONE FAILURE`, which keeps writes local too.
+
+| Table | Locality | Key columns | Rules |
+|---|---|---|---|
+| `region` | GLOBAL | `code` (region type), `name` | 3 fixed rows |
+| `player` | REGIONAL BY ROW (home region) | `id`, `root_id`, `previous_id`, `handle`, `status` (ACTIVE/SUSPENDED/BANNED), `reason`, `created_at` | `UNIQUE(previous_id)`; one first version per `root_id`; first version has `root_id = id`; `(handle_key, root_id)` must be owned in `player_handle` |
+| `player_handle` | **GLOBAL** | `handle_key` (lowercase name, PK), `root_id` | **Insert-only name ownership**: a name belongs to one player forever (never released) |
+| `friendship` | REGIONAL BY ROW (requester's region) | `id`, `root_id`, `previous_id`, `player_low`, `player_high`, `requested_by`, `status` (REQUESTED/ACCEPTED/DECLINED/REMOVED), `created_at` | `player_low < player_high` (sorted pair); one chain per pair, re-friending continues it |
+
+**Decisions:**
+- **Unique handles.** A plain `UNIQUE(handle)` fails because old versions keep old names, and an `is_current` flag would break the never-edited rule. The ownership table enforces uniqueness append-only.
+  - It is GLOBAL so uniqueness holds across regions. Its writes are slower, but sign-ups and renames are rare.
+  - Trade-off: names are never freed.
+- **Foreign keys to a player** always point at the first version's `id` (= `root_id`). That id is unique and permanent across renames and region moves.
+- **No email or password stored.** Authentication belongs to a separate account system, so the database holds no personal data.
+- **Player `status`** lets moderation (e.g. bans from P4's gift-farming detection) be recorded as new versions.
+- **Friendship pairs are sorted**, so A→B and B→A are the same friendship and cannot be duplicated. `requested_by` records who asked.
+
 ## Background: isolation levels (notes)
 
 - **READ COMMITTED:** each statement sees data committed at that moment. Two concurrent spend-limit checks can both pass (write skew), unless the code locks.
