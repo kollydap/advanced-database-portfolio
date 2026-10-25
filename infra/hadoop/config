@@ -1,0 +1,12 @@
+# apache/hadoop images turn FILE.XML_key=value env vars into Hadoop config files.
+CORE-SITE.XML_fs.defaultFS=hdfs://namenode:8020
+HDFS-SITE.XML_dfs.namenode.rpc-address=namenode:8020
+# Single datanode on a laptop, so one copy per block. On a real cluster: 3.
+HDFS-SITE.XML_dfs.replication=1
+# Spark runs as uid 185; skip POSIX permission checks for this lab cluster.
+HDFS-SITE.XML_dfs.permissions.enabled=false
+HDFS-SITE.XML_dfs.datanode.use.datanode.hostname=true
+HDFS-SITE.XML_dfs.client.use.datanode.hostname=true
+# Explicit storage dirs (inside the named volumes mounted at /hadoop/dfs)
+HDFS-SITE.XML_dfs.namenode.name.dir=/hadoop/dfs/name
+HDFS-SITE.XML_dfs.datanode.data.dir=/hadoop/dfs/data

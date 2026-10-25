@@ -1,0 +1,9 @@
+# Pinned at project start. Install: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+psycopg[binary]==3.3.6
+pymongo==4.19.0
+redis==8.1.0
+Faker==40.43.0
+duckdb==2.0.0
+confluent-kafka==2.16.0
+tabulate==0.10.0
+Markdown==3.11.2

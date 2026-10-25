@@ -1,0 +1,325 @@
+# Squadfire — Advanced Database Systems portfolio
+#
+# Profiles keep RAM manageable on a laptop:
+#   core    : CockroachDB x3 (one node per game region), MongoDB zone-sharded cluster
+#             (each shard = primary + async secondary + arbiter), Redis master + 2 async
+#             replicas + 3 Sentinels, Neo4j (player interaction graph)
+#   stream  : Kafka (KRaft) + Kafka Connect (Debezium)
+#   bigdata : HDFS (namenode + datanode) + Spark master/worker
+#
+#   docker compose --profile core up -d
+#
+# Regions (D1): us-east, eu-west, af-west (Lagos).
+
+x-crdb: &crdb
+  image: cockroachdb/cockroach:v25.3.1
+  profiles: ["core"]
+  networks: [squadfire]
+
+x-mongod: &mongod
+  image: mongo:8.0.12
+  profiles: ["core"]
+  networks: [squadfire]
+
+x-redis: &redis
+  image: redis:8.2.1
+  profiles: ["core"]
+  networks: [squadfire]
+
+services:
+  # ---------------------------------------------------------------- CockroachDB
+  # One node per region. --locality is what REGIONAL BY ROW tables use to place
+  # each row's fragment in its home region (D7).
+  crdb-useast:
+    <<: *crdb
+    hostname: crdb-useast
+    command: >
+      start --insecure --join=crdb-useast,crdb-euwest,crdb-afwest
+      --locality=region=us-east,zone=us-east-a
+      --advertise-addr=crdb-useast --cache=128MiB --max-sql-memory=192MiB
+    ports: ["26257:26257", "8090:8080"]
+    volumes: [crdb-useast:/cockroach/cockroach-data]
+
+  crdb-euwest:
+    <<: *crdb
+    hostname: crdb-euwest
+    command: >
+      start --insecure --join=crdb-useast,crdb-euwest,crdb-afwest
+      --locality=region=eu-west,zone=eu-west-a
+      --advertise-addr=crdb-euwest --cache=128MiB --max-sql-memory=192MiB
+    ports: ["26258:26257"]
+    volumes: [crdb-euwest:/cockroach/cockroach-data]
+
+  crdb-afwest:
+    <<: *crdb
+    hostname: crdb-afwest
+    command: >
+      start --insecure --join=crdb-useast,crdb-euwest,crdb-afwest
+      --locality=region=af-west,zone=af-west-a
+      --advertise-addr=crdb-afwest --cache=128MiB --max-sql-memory=192MiB
+    ports: ["26259:26257"]
+    volumes: [crdb-afwest:/cockroach/cockroach-data]
+
+  crdb-init:
+    <<: *crdb
+    depends_on: [crdb-useast, crdb-euwest, crdb-afwest]
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 30); do
+          ./cockroach init --insecure --host=crdb-useast 2>&1 | grep -qE "initialized|already been initialized" && break
+          sleep 2
+        done
+        ./cockroach sql --insecure --host=crdb-useast -e "CREATE DATABASE IF NOT EXISTS squadfire;"
+        echo "cockroach ready"
+
+  # ---------------------------------------------------------------- MongoDB
+  # Config server replica set
+  mongo-cfg:
+    <<: *mongod
+    hostname: mongo-cfg
+    command: mongod --configsvr --replSet cfgrs --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-cfg-sqf:/data/configdb]
+
+  # Each regional shard is a replica set: "a" = primary (master), "b" = secondary
+  # (slave) replicating the oplog asynchronously, plus an arbiter (votes only, no
+  # data) so the pair can still elect a primary when one member fails.
+  mongo-useast-a:
+    <<: *mongod
+    hostname: mongo-useast-a
+    command: mongod --shardsvr --replSet rs-useast --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-useast-a:/data/db]
+  mongo-useast-b:
+    <<: *mongod
+    hostname: mongo-useast-b
+    command: mongod --shardsvr --replSet rs-useast --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-useast-b:/data/db]
+  mongo-useast-arb:
+    <<: *mongod
+    hostname: mongo-useast-arb
+    command: mongod --shardsvr --replSet rs-useast --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+
+  mongo-euwest-a:
+    <<: *mongod
+    hostname: mongo-euwest-a
+    command: mongod --shardsvr --replSet rs-euwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-euwest-a:/data/db]
+  mongo-euwest-b:
+    <<: *mongod
+    hostname: mongo-euwest-b
+    command: mongod --shardsvr --replSet rs-euwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-euwest-b:/data/db]
+  mongo-euwest-arb:
+    <<: *mongod
+    hostname: mongo-euwest-arb
+    command: mongod --shardsvr --replSet rs-euwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+
+  mongo-afwest-a:
+    <<: *mongod
+    hostname: mongo-afwest-a
+    command: mongod --shardsvr --replSet rs-afwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-afwest-a:/data/db]
+  mongo-afwest-b:
+    <<: *mongod
+    hostname: mongo-afwest-b
+    command: mongod --shardsvr --replSet rs-afwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+    volumes: [mongo-afwest-b:/data/db]
+  mongo-afwest-arb:
+    <<: *mongod
+    hostname: mongo-afwest-arb
+    command: mongod --shardsvr --replSet rs-afwest --port 27017 --bind_ip_all --wiredTigerCacheSizeGB 0.25
+
+  mongos:
+    <<: *mongod
+    hostname: mongos
+    depends_on: [mongo-cfg]
+    command: mongos --configdb cfgrs/mongo-cfg:27017 --port 27017 --bind_ip_all
+    ports: ["27017:27017"]
+
+  mongo-init:
+    <<: *mongod
+    restart: "no"
+    depends_on:
+      [mongo-cfg, mongo-useast-a, mongo-useast-b, mongo-useast-arb, mongo-euwest-a,
+       mongo-euwest-b, mongo-euwest-arb, mongo-afwest-a, mongo-afwest-b,
+       mongo-afwest-arb, mongos]
+    volumes: ["./infra/mongo:/scripts:ro"]
+    entrypoint: ["bash", "/scripts/init-cluster.sh"]
+
+  # ---------------------------------------------------------------- Redis
+  # Master + 2 replicas. Redis replication is asynchronous: the master acks the
+  # client before replicas have the write.
+  redis-master:
+    <<: *redis
+    hostname: redis-master
+    command: redis-server --appendonly yes --save ""
+    ports: ["16379:6379"]
+  redis-replica-1:
+    <<: *redis
+    hostname: redis-replica-1
+    depends_on: [redis-master]
+    command: redis-server --replicaof redis-master 6379 --replica-read-only yes
+    ports: ["16380:6379"]
+  redis-replica-2:
+    <<: *redis
+    hostname: redis-replica-2
+    depends_on: [redis-master]
+    command: redis-server --replicaof redis-master 6379 --replica-read-only yes
+    ports: ["16381:6379"]
+
+  # Sentinels watch the master and promote a replica on failure (quorum 2 of 3).
+  sentinel-1: &sentinel
+    <<: *redis
+    depends_on: [redis-master, redis-replica-1, redis-replica-2]
+    volumes: ["./infra/redis:/scripts:ro"]
+    entrypoint: ["sh", "/scripts/sentinel-entrypoint.sh"]
+  sentinel-2: *sentinel
+  sentinel-3: *sentinel
+
+  # ---------------------------------------------------------------- Neo4j (D6)
+  # Player interaction graph. Authentication is disabled because this is a local
+  # lab with synthetic data only; a real deployment would set NEO4J_AUTH.
+  neo4j:
+    image: neo4j:5.26.12
+    profiles: ["core"]
+    hostname: neo4j
+    networks: [squadfire]
+    ports: ["7474:7474", "7687:7687"]   # browser UI, Bolt protocol
+    environment:
+      NEO4J_AUTH: none
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes: [neo4j-data:/data]
+
+  # ---------------------------------------------------------------- stream profile
+  # Single-node Kafka in KRaft mode (no ZooKeeper): this one process is both the
+  # metadata controller and the broker.
+  kafka:
+    image: apache/kafka:4.0.0
+    profiles: ["stream"]
+    hostname: kafka
+    networks: [squadfire]
+    ports: ["29092:29092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms512m
+    volumes: [kafka-data:/var/lib/kafka/data]
+
+  # Kafka Connect with the Debezium connectors: runs the MongoDB CDC source.
+  connect:
+    image: quay.io/debezium/connect:3.2.0.Final
+    profiles: ["stream"]
+    hostname: connect
+    networks: [squadfire]
+    depends_on: [kafka]
+    ports: ["8083:8083"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: squadfire-connect
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      HEAP_OPTS: -Xmx512m -Xms256m
+
+  # ---------------------------------------------------------------- bigdata profile
+  # Hadoop HDFS = the data lake's storage layer (namenode = metadata, datanode = blocks).
+  namenode:
+    image: apache/hadoop:3.4.1
+    platform: linux/amd64
+    profiles: ["bigdata"]
+    hostname: namenode
+    networks: [squadfire]
+    command: ["hdfs", "namenode"]
+    ports: ["9870:9870"]            # HDFS web UI
+    env_file: ./infra/hadoop/config
+    # root so the process can create its directories inside the named volume
+    user: root
+    environment:
+      # The image formats the namenode only if this directory does not exist yet,
+      # so the volume is mounted one level up (/hadoop/dfs).
+      ENSURE_NAMENODE_DIR: /hadoop/dfs/name
+      HADOOP_HEAPSIZE_MAX: 512m
+    volumes:
+      - lake-meta:/hadoop/dfs
+      - ./portfolio-5-distributed-cloud/warehouse/staging:/staging   # lake -> warehouse hand-off
+
+  datanode:
+    image: apache/hadoop:3.4.1
+    platform: linux/amd64
+    profiles: ["bigdata"]
+    hostname: datanode
+    networks: [squadfire]
+    command: ["hdfs", "datanode"]
+    depends_on: [namenode]
+    env_file: ./infra/hadoop/config
+    user: root
+    environment:
+      HADOOP_HEAPSIZE_MAX: 512m
+    volumes: [lake-blocks:/hadoop/dfs]
+
+  # Spark standalone cluster: one master + one worker.
+  spark-master:
+    image: apache/spark:3.5.6
+    profiles: ["bigdata"]
+    hostname: spark-master
+    networks: [squadfire]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    ports: ["8088:8080", "7077:7077", "4040:4040"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      HOME: /tmp
+    volumes:
+      - ./portfolio-5-distributed-cloud/spark:/jobs:ro
+
+  spark-worker:
+    image: apache/spark:3.5.6
+    profiles: ["bigdata"]
+    hostname: spark-worker
+    networks: [squadfire]
+    depends_on: [spark-master]
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    environment:
+      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: 1536m
+      SPARK_NO_DAEMONIZE: "true"
+      HOME: /tmp
+    volumes:
+      - ./portfolio-5-distributed-cloud/spark:/jobs:ro
+
+networks:
+  squadfire:
+    name: squadfire
+
+volumes:
+  crdb-useast:
+  crdb-euwest:
+  crdb-afwest:
+  mongo-cfg-sqf:
+  mongo-useast-a:
+  mongo-useast-b:
+  mongo-euwest-a:
+  mongo-euwest-b:
+  mongo-afwest-a:
+  mongo-afwest-b:
+  neo4j-data:
+  kafka-data:
+  lake-meta:
+  lake-blocks:

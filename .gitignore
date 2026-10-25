@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# generated data (reproducible from data-gen with a fixed seed)
+data-gen/out/
+*.duckdb
+*.duckdb.wal
+.env
+portfolio-5-distributed-cloud/warehouse/staging/
