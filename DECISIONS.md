@@ -250,6 +250,72 @@ Every chain is append-only, but not every append-only table is a chain.
 - **Player `status`** lets moderation (e.g. bans from P4's gift-farming detection) be recorded as new versions.
 - **Friendship pairs are sorted**, so A→B and B→A are the same friendship and cannot be duplicated. `requested_by` records who asked.
 
+## D11. Schema, group 2: item, item_price, limited_drop
+
+| Table | Locality | Key columns | Rules |
+|---|---|---|---|
+| `item` | GLOBAL, mutable | `sku` (PK, e.g. `AMMO-556-120`), `name`, `item_type` (AMMO/GRENADE/MEDKIT/SKIN), `units_per_pack`, `consumable`, `active` | `units_per_pack > 0`. MongoDB holds the rich document under the same `sku` |
+| `item_price` | REGIONAL BY ROW, dated list | `crdb_region`, `sku`, `effective_from`, `price_cents` | PK `(crdb_region, sku, effective_from)`; `price_cents > 0`. Current price = latest `effective_from ≤ now()`. **Future prices may be scheduled** |
+| `limited_drop` | REGIONAL BY ROW, **`remaining` mutable** | `id`, `crdb_region`, `sku`, `price_cents`, `total_packs`, `remaining`, `starts_at`, `ends_at` | `0 ≤ remaining ≤ total_packs`; `ends_at > starts_at` |
+
+**Decisions:**
+- **Drops are per region** (confirming D7). A central worldwide drop homed in one region was reconsidered: it is simpler, but remote players pay latency and lose races, so it is unfair. It stays as optional experiment 5.5.
+  - A central drop is not a GLOBAL table: GLOBAL suits rarely written data, and a drop is written constantly.
+- **The drop price lives on the drop row**, not in `item_price`. A drop is a self-contained event: one locked row gives stock and price together, and repeat drops of the same item keep their own prices. Purchase lines record the price actually paid, so reporting still works.
+- **No per-player cap on drops.** The daily spend limit already provides a per-player rule.
+- **`CHECK (remaining >= 0)` is only a safety net.** Two buyers who both read 12 and both write 11 break no constraint (a lost update). Locking is still required (P3).
+
+## D12. Schema, group 3: purchase, purchase_line, inventory
+
+| Table | Locality | Key columns | Rules |
+|---|---|---|---|
+| `purchase` | REGIONAL BY ROW (**payer's** region), chain | `id`, `root_id`, `previous_id`, `payer_id`, `recipient_id` (= payer, or a friend for a gift), `status` (SUCCEEDED/FAILED/REFUNDED), `total_cents`, `payment_method` (CARD/WALLET), `gateway_ref` (unique), `reason`, `created_at` | `UNIQUE(previous_id)`; one first version per `root_id`; **at most one refund per purchase** (`UNIQUE(root_id) WHERE status = 'REFUNDED'`) |
+| `purchase_line` | REGIONAL BY ROW (same as its purchase), insert-only | `purchase_id` (→ root), `sku`, `packs` (1–10), `unit_price_cents` (price paid), `line_total_cents`, `drop_id` (nullable) | PK `(purchase_id, sku)`; `line_total = packs × unit_price` |
+| `inventory` | REGIONAL BY ROW (**owner's** region), chain without `root_id` | `id`, `previous_id`, `player_id`, `sku`, `change`, `units_after`, `reason` (PURCHASED/GIFT_IN/USED/REFUNDED), `purchase_id` / `match_id`, `created_at` | `UNIQUE(previous_id)`; one first row per `(player_id, sku)`; `units_after ≥ 0`; reason ↔ reference `CHECK`; no double crediting: `UNIQUE(purchase_id, player_id, sku, reason)` and `UNIQUE(match_id, player_id, sku)` |
+
+| Question | Decision | Why |
+|---|---|---|
+| Q9 `PENDING` status? | **No** | The simulated gateway answers inside the transaction, so a purchase is saved directly as SUCCEEDED or FAILED |
+| Q10 Who can receive gifts? | **Accepted friends only**, checked in the purchase transaction | Stops spam and makes gift-farming harder |
+| Q11 `root_id` on inventory? | **No** (kept on `player`, `purchase`, `friendship`) | `root_id` has two jobs: grouping versions, and being a stable target for foreign keys. On inventory, `(player_id, sku)` never changes and already groups the chain, and no table references an inventory chain, so `root_id` would be redundant (the same fact stored twice). `friendship` keeps it for consistency with the other entity chains |
+| Q12 Arithmetic guarantee | **`BEFORE INSERT` trigger** checks `units_after = previous.units_after + change` | A `CHECK` cannot see the previous row; the trigger lets the database itself guarantee the chain adds up |
+| Q13 Refund after the ammo was used | **Allowed only if the player still holds all the units**; otherwise rejected by `units_after ≥ 0` | No negative balances, and a refund removes exactly what was bought |
+
+**Daily $50 check:** the sum of the *current* versions of the payer's purchases created today with status SUCCEEDED. Refunded purchases drop out automatically.
+
+**Cross-region gift:** the purchase is written in the payer's region and the recipient's inventory row in the recipient's region, in one distributed transaction.
+
+## D14. Schema, group 4: match, match_player
+
+| Table | Locality | Key columns | Rules |
+|---|---|---|---|
+| `match` | REGIONAL BY ROW (server's region), insert-only | `id`, `mode` (TEAM_DEATHMATCH/SEARCH_AND_DESTROY/DOMINATION), `map`, `started_at`, `ended_at`, `winning_squad` (call-sign, NULL = draw) | `ended_at > started_at`; **written once at match end** (live progress is only in telemetry) |
+| `match_player` | REGIONAL BY ROW (match's region), insert-only | `match_id`, `player_id`, `squad` (Alpha…Foxtrot), `kills`, `deaths`, `assists` | PK `(match_id, player_id)`; counts ≥ 0 |
+
+**Decisions:**
+- **Ammo used** is recorded in `inventory` as `USED` rows pointing to the match, not in `match_player`. Every shot goes to telemetry.
+- **Kills, deaths and assists are stored per match** even though telemetry holds every kill: a deliberate, documented denormalisation so leaderboards and the warehouse get totals quickly.
+- **Squad rules** (max 4 per squad, up to 6 squads): followed by the simulator and verified by a P1 integrity query. A row-count rule cannot be a simple constraint.
+
+**The schema is complete: 12 tables.**
+- Groups 1–4 (D10–D12, D14): `region`, `player`, `player_handle`, `friendship`, `item`, `item_price`, `limited_drop`, `purchase`, `purchase_line`, `inventory`, `match`, `match_player`.
+- D13 adds no table; it decides how history is kept.
+
+## D13. JSON change log vs chains
+
+**Option considered:** mutable rows with a JSON `change_log` column holding the history.
+
+**Rejected for the core tables** (`inventory`, `purchase`, `player`, `friendship`):
+- Lost updates return.
+- The history becomes editable.
+- The JSON grows without bound, and every update rewrites it.
+- No foreign keys, `CHECK`s or unique rules on history entries.
+- History is hard to query or index.
+- It violates 1NF (a repeating group in one column).
+- CDC would send the whole growing row on each change.
+
+**Used where it fits:** a small JSON `change_log` on `item` (mutable, rarely edited by staff, no integrity rules needed). It also shows a JSON column with an inverted index.
+
 ## Background: isolation levels (notes)
 
 - **READ COMMITTED:** each statement sees data committed at that moment. Two concurrent spend-limit checks can both pass (write skew), unless the code locks.

@@ -1,0 +1,167 @@
+> SET DATABASE = squadfire;
+SET
+> INSERT INTO region VALUES ('us-east', 'US East (Virginia)'), ('eu-west', 'EU West (Ireland)'), ('af-west', 'Africa West (Lagos)');
+> INSERT INTO item (sku, name, item_type, units_per_pack, consumable)
+VALUES ('AMMO-556-120', '5.56 mm Rounds (120)', 'AMMO', 120, true),
+       ('SKIN-TIGER-AK', 'Tiger Stripe AK skin', 'SKIN', 1, false);
+INSERT 0 3
+> INSERT INTO player_handle VALUES ('ironharmattan', 'a1000000-0000-0000-0000-000000000001');
+INSERT 0 2
+INSERT 0 1
+> INSERT INTO player (id, root_id, crdb_region, handle, reason)
+VALUES ('a1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'af-west', 'IronHarmattan', 'created');
+> INSERT INTO player_handle VALUES ('adaeze', 'e1000000-0000-0000-0000-000000000001');
+INSERT 0 1
+INSERT 0 1
+> INSERT INTO player (id, root_id, crdb_region, handle, reason)
+VALUES ('e1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001', 'eu-west', 'Adaeze', 'created');
+INSERT 0 1
+> INSERT INTO player_handle VALUES ('ironharmattan', 'e1000000-0000-0000-0000-000000000001');
+ERROR: duplicate key value violates unique constraint "player_handle_pkey"
+SQLSTATE: 23505
+DETAIL: Key (handle_key)=('ironharmattan') already exists.
+CONSTRAINT: player_handle_pkey
+> INSERT INTO player (root_id, previous_id, crdb_region, handle, reason)
+VALUES ('e1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001', 'eu-west', 'IronHarmattan', 'renamed');
+ERROR: insert on table "player" violates foreign key constraint "player_handle_key_root_id_fkey"
+SQLSTATE: 23503
+DETAIL: Key (handle_key, root_id)=('ironharmattan', 'e1000000-0000-0000-0000-000000000001') is not present in table "player_handle".
+CONSTRAINT: player_handle_key_root_id_fkey
+> INSERT INTO player (id, root_id, previous_id, crdb_region, handle, reason)
+VALUES ('a1000000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000001',
+        'a1000000-0000-0000-0000-000000000001', 'eu-west', 'IronHarmattan', 'moved_region');
+INSERT 0 1
+> INSERT INTO player (root_id, previous_id, crdb_region, handle, reason)
+VALUES ('a1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'af-west', 'IronHarmattan', 'renamed');
+ERROR: duplicate key value violates unique constraint "player_previous_id_key"
+SQLSTATE: 23505
+DETAIL: Key (previous_id)=('a1000000-0000-0000-0000-000000000001') already exists.
+CONSTRAINT: player_previous_id_key
+> UPDATE player SET handle = 'Hacked' WHERE id = 'a1000000-0000-0000-0000-000000000001';
+ERROR: table player is append-only: UPDATE is not allowed (insert a new version instead)
+SQLSTATE: 55000
+> INSERT INTO friendship (id, root_id, crdb_region, player_low, player_high, requested_by, status)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001', 'af-west',
+        'a1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+        'a1000000-0000-0000-0000-000000000001', 'REQUESTED');
+INSERT 0 1
+> INSERT INTO friendship (root_id, previous_id, crdb_region, player_low, player_high, requested_by, status)
+VALUES ('f1000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001', 'af-west',
+        'a1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+        'a1000000-0000-0000-0000-000000000001', 'ACCEPTED');
+> INSERT INTO friendship (root_id, crdb_region, player_low, player_high, requested_by, status)
+SELECT id, 'eu-west', 'e1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001',
+       'e1000000-0000-0000-0000-000000000001', 'REQUESTED' FROM (SELECT gen_random_uuid() AS id);
+INSERT 0 1
+ERROR: failed to satisfy CHECK constraint (player_low < player_high)
+SQLSTATE: 23514
+CONSTRAINT: check_player_low_player_high
+> INSERT INTO friendship (id, root_id, crdb_region, player_low, player_high, requested_by, status)
+VALUES ('f2000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000001', 'eu-west',
+        'a1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000001', 'REQUESTED');
+ERROR: duplicate key value violates unique constraint "friendship_one_chain_per_pair"
+SQLSTATE: 23505
+DETAIL: Key (player_low, player_high)=('a1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001') already exists.
+CONSTRAINT: friendship_one_chain_per_pair
+> INSERT INTO purchase (id, root_id, crdb_region, payer_id, recipient_id, status, total_cents, payment_method, gateway_ref, reason)
+VALUES ('b1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'eu-west',
+        'e1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001',
+        'SUCCEEDED', 447, 'CARD', 'GW-0001', 'created');
+INSERT 0 1
+> INSERT INTO purchase_line (crdb_region, purchase_id, sku, packs, unit_price_cents, line_total_cents)
+VALUES ('eu-west', 'b1000000-0000-0000-0000-000000000001', 'AMMO-556-120', 3, 149, 447);
+INSERT 0 1
+> INSERT INTO purchase_line (crdb_region, purchase_id, sku, packs, unit_price_cents, line_total_cents)
+VALUES ('eu-west', 'b1000000-0000-0000-0000-000000000001', 'SKIN-TIGER-AK', 1, 499, 400);
+ERROR: failed to satisfy CHECK constraint (line_total_cents = (packs * unit_price_cents))
+SQLSTATE: 23514
+CONSTRAINT: check_line_total_cents_packs_unit_price_cents
+> INSERT INTO match (id, crdb_region, mode, map, started_at, ended_at, winning_squad)
+VALUES ('c1000000-0000-0000-0000-000000000001', 'eu-west', 'TEAM_DEATHMATCH', 'Lagos Docks',
+        now() - INTERVAL '20 minutes', now(), 'Alpha');
+> INSERT INTO inventory (id, crdb_region, player_id, sku, change, units_after, reason, purchase_id)
+VALUES ('d1000000-0000-0000-0000-000000000001', 'eu-west', 'a1000000-0000-0000-0000-000000000001',
+        'AMMO-556-120', 360, 360, 'GIFT_IN', 'b1000000-0000-0000-0000-000000000001');
+INSERT 0 1
+INSERT 0 1
+> INSERT INTO inventory (id, previous_id, crdb_region, player_id, sku, change, units_after, reason, match_id)
+VALUES ('d1000000-0000-0000-0000-000000000002', 'd1000000-0000-0000-0000-000000000001', 'eu-west',
+        'a1000000-0000-0000-0000-000000000001', 'AMMO-556-120', -214, 146, 'USED', 'c1000000-0000-0000-0000-000000000001');
+> INSERT INTO inventory (previous_id, crdb_region, player_id, sku, change, units_after, reason, purchase_id)
+VALUES ('d1000000-0000-0000-0000-000000000002', 'eu-west', 'a1000000-0000-0000-0000-000000000001',
+        'AMMO-556-120', 100, 999, 'PURCHASED', 'b1000000-0000-0000-0000-000000000001');
+INSERT 0 1
+ERROR: inventory does not add up: 146 + 100 <> 999
+SQLSTATE: 23514
+> INSERT INTO inventory (previous_id, crdb_region, player_id, sku, change, units_after, reason, match_id)
+VALUES ('d1000000-0000-0000-0000-000000000001', 'eu-west', 'a1000000-0000-0000-0000-000000000001',
+        'AMMO-556-120', -10, 350, 'USED', 'c1000000-0000-0000-0000-000000000001');
+ERROR: duplicate key value violates unique constraint "inventory_previous_id_key"
+SQLSTATE: 23505
+DETAIL: Key (previous_id)=('d1000000-0000-0000-0000-000000000001') already exists.
+CONSTRAINT: inventory_previous_id_key
+> INSERT INTO inventory (previous_id, crdb_region, player_id, sku, change, units_after, reason, purchase_id)
+VALUES ('d1000000-0000-0000-0000-000000000002', 'eu-west', 'a1000000-0000-0000-0000-000000000001',
+        'AMMO-556-120', -360, -214, 'REFUNDED', 'b1000000-0000-0000-0000-000000000001');
+ERROR: failed to satisfy CHECK constraint (units_after >= 0:::INT8)
+SQLSTATE: 23514
+CONSTRAINT: check_units_after
+> INSERT INTO purchase (root_id, previous_id, crdb_region, payer_id, recipient_id, status, total_cents, payment_method, gateway_ref, reason)
+VALUES ('b1000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 'eu-west',
+        'e1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001',
+        'REFUNDED', 447, 'CARD', 'GW-0001', 'refunded');
+INSERT 0 1
+> INSERT INTO purchase (id, root_id, crdb_region, payer_id, recipient_id, status, total_cents, payment_method, gateway_ref, reason)
+VALUES ('b2000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', 'eu-west',
+        'e1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+        'FAILED', 149, 'CARD', 'GW-0002', 'created');
+INSERT 0 1
+> INSERT INTO purchase (root_id, previous_id, crdb_region, payer_id, recipient_id, status, total_cents, payment_method, gateway_ref, reason)
+VALUES ('b2000000-0000-0000-0000-000000000001', 'b2000000-0000-0000-0000-000000000001', 'eu-west',
+        'e1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001',
+        'REFUNDED', 149, 'CARD', 'GW-0002', 'refunded');
+ERROR: only a SUCCEEDED purchase can be refunded (previous status: FAILED)
+SQLSTATE: 23514
+> INSERT INTO limited_drop (id, crdb_region, sku, price_cents, total_packs, remaining, starts_at, ends_at)
+VALUES ('9d000000-0000-0000-0000-000000000001', 'af-west', 'AMMO-556-120', 399, 500, 1, now(), now() + INTERVAL '2 days');
+INSERT 0 1
+> UPDATE limited_drop SET remaining = remaining - 1 WHERE id = '9d000000-0000-0000-0000-000000000001';
+> UPDATE limited_drop SET remaining = remaining - 1 WHERE id = '9d000000-0000-0000-0000-000000000001';
+UPDATE 1
+ERROR: failed to satisfy CHECK constraint (remaining BETWEEN 0:::INT8 AND total_packs)
+SQLSTATE: 23514
+CONSTRAINT: check_remaining_total_packs
+> SET ROLE squadfire_app;
+> UPDATE purchase SET total_cents = 1 WHERE root_id = 'b1000000-0000-0000-0000-000000000001';
+SET
+ERROR: user squadfire_app does not have UPDATE privilege on relation purchase
+SQLSTATE: 42501
+> RESET ROLE;
+RESET
+> SELECT player_id, handle, home_region, status FROM current_player ORDER BY handle;
+> SELECT root_id, previous_id, crdb_region, handle, reason FROM player ORDER BY created_at;
+player_id	handle	home_region	status
+e1000000-0000-0000-0000-000000000001	Adaeze	eu-west	ACTIVE
+a1000000-0000-0000-0000-000000000001	IronHarmattan	eu-west	ACTIVE
+> SELECT status FROM current_friendship;
+root_id	previous_id	crdb_region	handle	reason
+a1000000-0000-0000-0000-000000000001	NULL	af-west	IronHarmattan	created
+e1000000-0000-0000-0000-000000000001	NULL	eu-west	Adaeze	created
+a1000000-0000-0000-0000-000000000001	a1000000-0000-0000-0000-000000000001	eu-west	IronHarmattan	moved_region
+> SELECT purchase_id, status, total_cents FROM current_purchase;
+status
+ACCEPTED
+> SELECT player_id, sku, units FROM current_inventory;
+purchase_id	status	total_cents
+b1000000-0000-0000-0000-000000000001	REFUNDED	447
+b2000000-0000-0000-0000-000000000001	FAILED	149
+> SELECT 'player_af_west' AS fragment, count(*) FROM player_af_west
+UNION ALL SELECT 'player_eu_west', count(*) FROM player_eu_west
+UNION ALL SELECT 'player_us_east', count(*) FROM player_us_east;
+player_id	sku	units
+a1000000-0000-0000-0000-000000000001	AMMO-556-120	146
+fragment	count
+player_af_west	1
+player_eu_west	2
+player_us_east	0
