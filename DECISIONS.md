@@ -203,7 +203,7 @@ Every chain is append-only, but not every append-only table is a chain.
 **Simulator:**
 - A match simulator writes matches and end-of-match `inventory` USED rows to CockroachDB, and sends the matching events to Kafka.
 - The two sides agree: the rounds fired in telemetry equal the USED rounds in the inventory chain.
-- Target volume: **~3–5 million events** (reduced to ~200k by D16).
+- Target volume: **~3–5 million events** (reduced to ~430k by D16).
 
 **Privacy:** generated handles only. No real names, no chat text, nothing personal in the lake.
 
@@ -349,6 +349,17 @@ Every chain is append-only, but not every append-only table is a chain.
 
 **Dropped:** 2.2, 2.4, 3.1/3.4 as separate experiments, Debezium CDC from MongoDB, the MongoDB `w:1` rollback demo, 5.5.
 
-**Data volume:** ~5k players, ~50k purchases, ~2.5k matches, ~200k telemetry events, instead of 3–5M. That's enough for indexes to change plans, and loads in minutes on 8 GB.
+**Data volume:** ~5k players, ~50k purchases, ~2.5k matches, ~430k telemetry events, instead of 3–5M. That's enough for indexes to change plans, and loads in minutes on 8 GB.
 
 **Why:** the marking criteria are about design, reasoning and evidence, not data volume. Every store and flow is still shown working.
+
+## D17. Data generator
+
+**What it does:** [`data-gen/generate.py`](data-gen/generate.py) replays a fake 30-day month in time order: players, friendships, purchases (with gifts, failed payments, refunds and drop packs) and matches. It keeps a running state (balances, today's spend, drop stock), so every row obeys the rules at that moment. It writes the matching telemetry to `data-gen/out/telemetry.jsonl` for portfolio 5. A fixed seed (8103) gives the same data every run.
+
+**Decisions:**
+- **Over the $50 limit → refused, nothing saved.** That's what the live system would do. A blocked attempt is not a purchase.
+- **History is loaded directly by the database owner**, not through `sign_up`. The month is in the past and `sign_up` stamps `now()`. The generator is a one-off setup tool and still writes the claim and the player together. Adding a date parameter to `sign_up` was rejected, because the app could then fake sign-up dates.
+- **Loading in generations, 500 rows per statement.** One statement per row did not finish in an hour. A chain row's previous row is always in an earlier generation, so it is already saved when the inventory trigger reads it.
+
+**Result:** 5,100 player rows, 47,430 purchases, 94,880 inventory rows, 2,500 matches, ~434k events. All 11 integrity checks show 0 violations ([`evidence/integrity.txt`](portfolio-1-database-design/evidence/integrity.txt)).
