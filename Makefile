@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -27,6 +27,29 @@ down:
 
 status:
 	$(COMPOSE) $(ALL) ps --format 'table {{.Name}}\t{{.Status}}'
+
+# ---------------------------------------------------------------- portfolio 1
+CRDB := $(COMPOSE) exec -T crdb-useast ./cockroach sql --insecure
+P1   := portfolio-1-database-design
+
+# Drops and recreates the squadfire database (all its rows are generated), then
+# applies the schema, rules and views.
+p1-build:
+	$(CRDB) -e "DROP DATABASE IF EXISTS squadfire CASCADE"
+	@for f in 00_database 01_schema 02_rules 03_views; do echo "applying $$f"; $(CRDB) < $(P1)/sql/$$f.sql > /dev/null || exit 1; done
+
+# Every rule tried once right (accepted) and once wrong (rejected)
+p1-tests: p1-build
+	$(CRDB) --set=errexit=false --echo-sql < $(P1)/sql/04_rule_tests.sql > $(P1)/evidence/rule-tests.txt 2>&1
+	@grep -c '^ERROR' $(P1)/evidence/rule-tests.txt | xargs echo "rejected statements:"
+
+# 30 days of history (~5k players, ~50k purchases, ~2.5k matches) + telemetry file
+seed: p1-build
+	$(PY) data-gen/generate.py
+	@$(MAKE) --no-print-directory p1-integrity
+
+p1-integrity:
+	$(CRDB) < $(P1)/sql/05_integrity.sql | tee $(P1)/evidence/integrity.txt
 
 # Interactive shells
 sql:

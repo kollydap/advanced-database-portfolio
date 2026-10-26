@@ -11,13 +11,11 @@ INSERT INTO item (sku, name, item_type, units_per_pack, consumable)
 VALUES ('AMMO-556-120', '5.56 mm Rounds (120)', 'AMMO', 120, true),
        ('SKIN-TIGER-AK', 'Tiger Stripe AK skin', 'SKIN', 1, false);
 
--- T1  Claim a name and create a player (first version: root_id = id)
-INSERT INTO player_handle VALUES ('ironharmattan', 'a1000000-0000-0000-0000-000000000001');
-INSERT INTO player (id, root_id, crdb_region, handle, reason)
-VALUES ('a1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'af-west', 'IronHarmattan', 'created');
-INSERT INTO player_handle VALUES ('adaeze', 'e1000000-0000-0000-0000-000000000001');
-INSERT INTO player (id, root_id, crdb_region, handle, reason)
-VALUES ('e1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001', 'eu-west', 'Adaeze', 'created');
+-- T1  Sign up as the application: claim + first version in one call (root_id = id)
+SET ROLE squadfire_app;
+CALL sign_up('a1000000-0000-0000-0000-000000000001', 'IronHarmattan', 'af-west');
+CALL sign_up('e1000000-0000-0000-0000-000000000001', 'Adaeze', 'eu-west');
+RESET ROLE;
 
 -- T2  REJECT: Ada tries to claim Tunde's name (any capitalisation)
 INSERT INTO player_handle VALUES ('ironharmattan', 'e1000000-0000-0000-0000-000000000001');
@@ -126,6 +124,17 @@ SET ROLE squadfire_app;
 UPDATE purchase SET total_cents = 1 WHERE root_id = 'b1000000-0000-0000-0000-000000000001';
 RESET ROLE;
 
+-- T21 REJECT (privilege layer): the application inserts a claim on its own (an orphan)
+SET ROLE squadfire_app;
+INSERT INTO player_handle VALUES ('coolname', '00000000-0000-0000-0000-00000000dead');
+
+-- T22 Ada renames herself: new claim + new version, same region and status
+CALL rename_player('e1000000-0000-0000-0000-000000000001', 'AdaWarlord');
+
+-- T23 REJECT: renaming to a name another player owns (nothing is written)
+CALL rename_player('e1000000-0000-0000-0000-000000000001', 'ironHARMATTAN');
+RESET ROLE;
+
 -- ---------------------------------------------------------------- results
 SELECT player_id, handle, home_region, status FROM current_player ORDER BY handle;
 SELECT root_id, previous_id, crdb_region, handle, reason FROM player ORDER BY created_at;
@@ -135,3 +144,6 @@ SELECT player_id, sku, units FROM current_inventory;
 SELECT 'player_af_west' AS fragment, count(*) FROM player_af_west
 UNION ALL SELECT 'player_eu_west', count(*) FROM player_eu_west
 UNION ALL SELECT 'player_us_east', count(*) FROM player_us_east;
+-- orphan claims (a name no player version uses): must be 0
+SELECT count(*) AS orphan_claims FROM player_handle h
+WHERE NOT EXISTS (SELECT 1 FROM player p WHERE p.root_id = h.root_id AND p.handle_key = h.handle_key);

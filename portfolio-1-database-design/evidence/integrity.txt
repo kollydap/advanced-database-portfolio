@@ -1,0 +1,21 @@
+SET
+rule	violations
+orphan name claims (D15)	0
+references to a non-root player version	0
+squads with more than 4 players (D14)	0
+purchase total <> sum of its lines	0
+gifts to someone who was not a friend (D7)	0
+payer-days over the $50 limit (D3)	0
+paid lines not credited to the recipient (D3)	0
+inventory credited from a FAILED purchase	0
+current balance <> sum of chain changes	0
+drop counter <> packs sold (D6)	0
+child rows outside their parent's fragment	0
+t	rows
+player	5100
+friendship	25386
+purchase	47430
+purchase_line	66563
+inventory	94880
+match	2500
+match_player	21392

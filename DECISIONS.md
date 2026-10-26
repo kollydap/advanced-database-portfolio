@@ -203,7 +203,7 @@ Every chain is append-only, but not every append-only table is a chain.
 **Simulator:**
 - A match simulator writes matches and end-of-match `inventory` USED rows to CockroachDB, and sends the matching events to Kafka.
 - The two sides agree: the rounds fired in telemetry equal the USED rounds in the inventory chain.
-- Target volume: **~3–5 million events**.
+- Target volume: **~3–5 million events** (reduced to ~200k by D16).
 
 **Privacy:** generated handles only. No real names, no chat text, nothing personal in the lake.
 
@@ -320,3 +320,35 @@ Every chain is append-only, but not every append-only table is a chain.
 
 - **READ COMMITTED:** each statement sees data committed at that moment. Two concurrent spend-limit checks can both pass (write skew), unless the code locks.
 - **SERIALIZABLE:** the result must equal *some* one-after-another order. A transaction whose reads were invalidated gets error **40001** and must retry. This is CockroachDB's default.
+
+## D15. Name claims only through procedures
+
+**Problem:** `player → player_handle` is a foreign key, but the reverse direction can't be one: CockroachDB has no deferred constraints, so with both links no insert order works. A claim inserted on its own would reserve a name for nobody (an **orphan claim**).
+
+**Decision:**
+- Two `SECURITY DEFINER` procedures write the claim and the player version together, in one transaction:
+  - `sign_up(id, handle, region)`
+  - `rename_player(player, handle)`: no new claim if the player already owns the name
+- `squadfire_app` loses INSERT on `player_handle` (keeps SELECT) and gets EXECUTE on both procedures.
+- INSERT on `player` stays: moves and suspensions add versions directly, and the foreign key still forces a name the player owns.
+- The P1 integrity query "orphan claims = 0" stays as the final proof.
+
+**Evidence:** rule tests T1 (sign-up through `CALL`), T21 (direct claim rejected, 42501), T22 (rename), T23 (rename to a taken name rejected, nothing written).
+
+## D16. Minimal scope (replaces the experiment list in D9)
+
+**Decision:** keep the whole architecture and every data flow, and prove each **once, with small data**. The remaining build moves faster: Claude builds each step, explains it, and commits after approval.
+
+| Portfolio | Kept |
+|---|---|
+| **P1** | ERD, schema and rules (done), normalisation 0NF → BCNF, integrity checks |
+| **P2** | 2.1 current ammo (index before/after) · 2.3 today's spend · 2.5 region-local vs unknown region · one MongoDB `explain()` |
+| **P3** | 3.2 last drop pack (lost update) · 3.3 daily limit (write skew, READ COMMITTED vs SERIALIZABLE) · 3.5 cross-region gift. Commit/rollback and `UNIQUE(previous_id)` are already shown by the rule tests (T12–T16) |
+| **P4** | MongoDB catalogue with a validator + one aggregation · Redis leaderboard + cache-aside · Neo4j: friends-of-friends, gift graph |
+| **P5** | One changefeed (`purchase`, `inventory`) → Kafka → one Spark job → HDFS bronze/silver/gold → DuckDB star (1 fact, 3 dimensions) · CockroachDB node failure · Redis Sentinel failover |
+
+**Dropped:** 2.2, 2.4, 3.1/3.4 as separate experiments, Debezium CDC from MongoDB, the MongoDB `w:1` rollback demo, 5.5.
+
+**Data volume:** ~5k players, ~50k purchases, ~2.5k matches, ~200k telemetry events, instead of 3–5M. That's enough for indexes to change plans, and loads in minutes on 8 GB.
+
+**Why:** the marking criteria are about design, reasoning and evidence, not data volume. Every store and flow is still shown working.
