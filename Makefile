@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -77,3 +77,8 @@ redis:
 
 neo4j:
 	$(COMPOSE) exec neo4j cypher-shell
+
+# usage: make p2-mongo EXP=2.6_storefront_explain   (mongosh script, run through mongos)
+p2-mongo:
+	$(COMPOSE) exec -T mongos mongosh --quiet squadfire --eval "$$(cat $(P2)/mongo/$(EXP).js)" > $(P2)/evidence/$(EXP).txt 2>&1
+	@cat $(P2)/evidence/$(EXP).txt

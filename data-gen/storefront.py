@@ -60,11 +60,15 @@ def main():
     db.storefront.drop()
     # Zones first, then shard the empty collection: MongoDB creates one chunk
     # per region directly on that region's shard, so nothing has to migrate.
-    for region in sorted({d["region"] for d in docs}):
-        client.admin.command("updateZoneKeyRange", "squadfire.storefront",
-                             min={"region": region, "sku": MinKey()},
-                             max={"region": region, "sku": MaxKey()},
-                             zone=region)
+    # The zones cover the whole key space with no gaps (af-west from MinKey,
+    # us-east to MaxKey). With gaps, the gap chunks sit on the primary shard
+    # and a region-only query, whose bounds reach (region, MaxKey), asks it too.
+    regions = sorted({d["region"] for d in docs})
+    bounds = [{"region": MinKey(), "sku": MinKey()}] + \
+             [{"region": r, "sku": MinKey()} for r in regions[1:]] + \
+             [{"region": MaxKey(), "sku": MaxKey()}]
+    for region, lo, hi in zip(regions, bounds, bounds[1:]):
+        client.admin.command("updateZoneKeyRange", "squadfire.storefront", min=lo, max=hi, zone=region)
     # shard key: region first, so one region's documents form one range
     client.admin.command("shardCollection", "squadfire.storefront", key={"region": 1, "sku": 1})
     db.storefront.insert_many(docs)

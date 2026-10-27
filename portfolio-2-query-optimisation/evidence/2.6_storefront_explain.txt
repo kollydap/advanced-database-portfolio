@@ -1,0 +1,108 @@
+
+## A. AP rounds in us-east (region given)
+{
+  router_stage: 'SINGLE_SHARD',
+  shards_asked: 1,
+  shard_plans: [
+    'rs-useast: FETCH > IXSCAN'
+  ],
+  returned: 1,
+  keys_examined: 1,
+  docs_examined: 1,
+  time_ms: 0
+}
+
+## B. AP rounds, region not given
+{
+  router_stage: 'SHARD_MERGE',
+  shards_asked: 3,
+  shard_plans: [
+    'rs-afwest: SHARDING_FILTER > COLLSCAN',
+    'rs-useast: SHARDING_FILTER > COLLSCAN',
+    'rs-euwest: SHARDING_FILTER > COLLSCAN'
+  ],
+  returned: 3,
+  keys_examined: 0,
+  docs_examined: 33,
+  time_ms: 2
+}
+
+## B2. AP rounds, region not given, with index on sku
+{
+  router_stage: 'SHARD_MERGE',
+  shards_asked: 3,
+  shard_plans: [
+    'rs-afwest: SHARDING_FILTER > FETCH > IXSCAN',
+    'rs-euwest: SHARDING_FILTER > FETCH > IXSCAN',
+    'rs-useast: SHARDING_FILTER > FETCH > IXSCAN'
+  ],
+  returned: 3,
+  keys_examined: 3,
+  docs_examined: 3,
+  time_ms: 1
+}
+
+## C. all 5.56mm ammo, no index on details.calibre
+{
+  router_stage: 'SHARD_MERGE',
+  shards_asked: 3,
+  shard_plans: [
+    'rs-useast: SHARDING_FILTER > COLLSCAN',
+    'rs-afwest: SHARDING_FILTER > COLLSCAN',
+    'rs-euwest: SHARDING_FILTER > COLLSCAN'
+  ],
+  returned: 6,
+  keys_examined: 0,
+  docs_examined: 33,
+  time_ms: 0
+}
+
+## D. all 5.56mm ammo, with index on details.calibre
+{
+  router_stage: 'SHARD_MERGE',
+  shards_asked: 3,
+  shard_plans: [
+    'rs-useast: SHARDING_FILTER > FETCH > IXSCAN',
+    'rs-afwest: SHARDING_FILTER > FETCH > IXSCAN',
+    'rs-euwest: SHARDING_FILTER > FETCH > IXSCAN'
+  ],
+  returned: 6,
+  keys_examined: 6,
+  docs_examined: 6,
+  time_ms: 1
+}
+
+## E. 5.56mm ammo in af-west (region + index)
+{
+  router_stage: 'SINGLE_SHARD',
+  shards_asked: 1,
+  shard_plans: [
+    'rs-afwest: SHARDING_FILTER > FETCH > IXSCAN'
+  ],
+  returned: 2,
+  keys_examined: 2,
+  docs_examined: 2,
+  time_ms: 1
+}
+
+## E. answer
+{
+  sku: 'AMMO-556-120',
+  name: '5.56 mm Rounds (120)',
+  price: {
+    cents: 119
+  },
+  details: {
+    penetration: 2
+  }
+}
+{
+  sku: 'AMMO-AP-60',
+  name: 'Armour-Piercing 5.56 mm (60)',
+  price: {
+    cents: 239
+  },
+  details: {
+    penetration: 5
+  }
+}
