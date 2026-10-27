@@ -1,0 +1,57 @@
+
+== Run 1: read, then write the app's value  (READ COMMITTED)
+   drop has 1 pack left
+    149.5 ms  [A] BEGIN (READ COMMITTED)
+    149.8 ms  [B] BEGIN (READ COMMITTED)
+    152.5 ms  [A] SELECT remaining -> 1   ("one left, I can buy it")
+    154.4 ms  [B] SELECT remaining -> 1   ("one left, I can buy it")
+    156.8 ms  [A] UPDATE remaining = 0
+    161.2 ms  [A] COMMIT -> bought the pack
+    165.9 ms  [B] UPDATE remaining = 0
+    174.0 ms  [B] COMMIT -> bought the pack
+   result: packs sold = 2 (A, B), remaining = 0  -> OVERSOLD
+
+== Run 2: SELECT ... FOR UPDATE              (READ COMMITTED)
+   drop has 1 pack left
+    197.9 ms  [A] BEGIN (READ COMMITTED)
+    200.7 ms  [A] SELECT remaining FOR UPDATE -> 1   (row locked)
+    201.2 ms  [B] BEGIN (READ COMMITTED)
+    201.2 ms  [B] SELECT remaining FOR UPDATE ... waiting for A's lock
+    708.3 ms  [A] UPDATE remaining = 0
+    712.2 ms  [A] COMMIT -> bought the pack
+    720.0 ms  [B] ... got the lock after 519 ms -> 0
+    721.9 ms  [B] sold out -> ROLLBACK, nothing charged
+   result: packs sold = 1 (A), remaining = 0  -> correct
+
+== Run 3: one-step UPDATE ... WHERE > 0      (READ COMMITTED)
+   drop has 1 pack left
+    731.9 ms  [A] BEGIN (READ COMMITTED)
+    737.7 ms  [A] UPDATE ... WHERE remaining > 0 -> 1 row, remaining now 0
+    738.2 ms  [B] BEGIN (READ COMMITTED)
+    738.2 ms  [B] UPDATE ... WHERE remaining > 0 ... waiting for A
+   1248.7 ms  [A] COMMIT -> bought the pack
+   1255.6 ms  [B] ... after 517 ms -> 0 rows (re-checked remaining > 0 on A's result)
+   1257.0 ms  [B] sold out -> ROLLBACK, nothing charged
+   result: packs sold = 1 (A), remaining = 0  -> correct
+
+== Run 4: read, then write the app's value  (SERIALIZABLE)
+   drop has 1 pack left
+   1270.9 ms  [A] BEGIN (SERIALIZABLE)
+   1271.3 ms  [B] BEGIN (SERIALIZABLE)
+   1273.3 ms  [A] SELECT remaining -> 1   ("one left, I can buy it")
+   1274.5 ms  [B] SELECT remaining -> 1   ("one left, I can buy it")
+   1277.1 ms  [A] UPDATE remaining = 0
+   1280.0 ms  [A] COMMIT -> bought the pack
+   1282.4 ms  [B] ERROR 40001 restart transaction
+   1283.0 ms  [B] ROLLBACK; retrying the whole purchase
+   1283.4 ms  [B] BEGIN (SERIALIZABLE)
+   1284.6 ms  [B] SELECT remaining -> 0
+   1285.0 ms  [B] sold out -> ROLLBACK, nothing charged
+   result: packs sold = 1 (A), remaining = 0  -> correct
+
+== Summary (1 pack available each run)
+   run  how                                                  sold left  verdict
+   1    read, then write the app's value  (READ COMMITTED)      2    0  OVERSOLD
+   2    SELECT ... FOR UPDATE              (READ COMMITTED)     1    0  correct
+   3    one-step UPDATE ... WHERE > 0      (READ COMMITTED)     1    0  correct
+   4    read, then write the app's value  (SERIALIZABLE)        1    0  correct

@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -82,3 +82,10 @@ neo4j:
 p2-mongo:
 	$(COMPOSE) exec -T mongos mongosh --quiet squadfire --eval "$$(cat $(P2)/mongo/$(EXP).js)" > $(P2)/evidence/$(EXP).txt 2>&1
 	@cat $(P2)/evidence/$(EXP).txt
+
+# ---------------------------------------------------------------- portfolio 3
+P3 := portfolio-3-transactions-concurrency
+# usage: make p3 EXP=3.2_last_pack   (two-session race script; log saved as evidence)
+p3:
+	@mkdir -p $(P3)/evidence
+	$(PY) $(P3)/scripts/$(EXP).py | tee $(P3)/evidence/$(EXP).txt
