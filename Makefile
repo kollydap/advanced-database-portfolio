@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity p2
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -50,6 +50,15 @@ seed: p1-build
 
 p1-integrity:
 	$(CRDB) < $(P1)/sql/05_integrity.sql | tee $(P1)/evidence/integrity.txt
+
+# ---------------------------------------------------------------- portfolio 2
+P2 := portfolio-2-query-optimisation
+
+# Each experiment drops its index, plans the query (before), creates the index
+# and plans it again (after). Usage: make p2 EXP=2.1_current_ammo
+p2:
+	$(CRDB) --format=table --echo-sql < $(P2)/sql/$(EXP).sql > $(P2)/evidence/$(EXP).txt 2>&1
+	@grep -E "execution time|rows decoded|spans:" $(P2)/evidence/$(EXP).txt
 
 # Interactive shells
 sql:
