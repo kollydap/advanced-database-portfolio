@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity p2
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -46,7 +46,12 @@ p1-tests: p1-build
 # 30 days of history (~5k players, ~50k purchases, ~2.5k matches) + telemetry file
 seed: p1-build
 	$(PY) data-gen/generate.py
+	$(PY) data-gen/storefront.py
 	@$(MAKE) --no-print-directory p1-integrity
+
+# MongoDB storefront only: 33 documents (11 items x 3 regions), zone-sharded by region
+storefront:
+	$(PY) data-gen/storefront.py
 
 p1-integrity:
 	$(CRDB) < $(P1)/sql/05_integrity.sql | tee $(P1)/evidence/integrity.txt
