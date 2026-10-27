@@ -1,0 +1,66 @@
+
+== Run 1: sum, then insert                     (READ COMMITTED)
+   spent today $40.00 (2 earlier purchases), limit $50.00, two $8.00 purchases at once
+    270.1 ms  [A] BEGIN (READ COMMITTED)
+    270.4 ms  [B] BEGIN (READ COMMITTED)
+    272.3 ms  [A] SELECT sum(today) -> $40.00
+    273.2 ms  [B] SELECT sum(today) -> $40.00
+    273.4 ms  [A] spent today $40.00 + $8.00 = $48.00 -> OK
+    274.6 ms  [A] INSERT purchase $8.00
+    275.9 ms  [A] COMMIT -> purchase accepted
+    275.9 ms  [B] spent today $40.00 + $8.00 = $48.00 -> OK
+    276.9 ms  [B] INSERT purchase $8.00
+    278.2 ms  [B] COMMIT -> purchase accepted
+   result: 2 of 2 accepted, spent today = $56.00  -> LIMIT BROKEN
+
+== Run 2: sum with FOR UPDATE, then insert     (READ COMMITTED)
+   spent today $40.00 (2 earlier purchases), limit $50.00, two $8.00 purchases at once
+    287.9 ms  [A] BEGIN (READ COMMITTED)
+    288.1 ms  [B] BEGIN (READ COMMITTED)
+    289.9 ms  [A] SELECT today's purchases FOR UPDATE -> $40.00 (those rows locked)
+    289.9 ms  [A] spent today $40.00 + $8.00 = $48.00 -> OK
+    290.8 ms  [A] INSERT purchase $8.00 (a new row: not one of the locked ones)
+    290.9 ms  [B] SELECT today's purchases FOR UPDATE ... waiting for A's locks
+    796.7 ms  [A] COMMIT -> purchase accepted
+    799.2 ms  [B] ... after 508 ms -> $40.00
+    799.3 ms  [B] spent today $40.00 + $8.00 = $48.00 -> OK
+    800.6 ms  [B] INSERT purchase $8.00
+    802.2 ms  [B] COMMIT -> purchase accepted
+   result: 2 of 2 accepted, spent today = $56.00  -> LIMIT BROKEN
+
+== Run 3: lock the player row first (procedure) (READ COMMITTED)
+   spent today $40.00 (2 earlier purchases), limit $50.00, two $8.00 purchases at once
+    816.6 ms  [A] BEGIN (READ COMMITTED)
+    838.2 ms  [A] CALL lab_buy_guarded: player row locked, spent $40.00 + $8.00 OK, purchase inserted
+    839.8 ms  [B] BEGIN (READ COMMITTED)
+    839.8 ms  [B] CALL lab_buy_guarded ... waiting for the player row
+   1346.8 ms  [A] COMMIT -> purchase accepted
+   1361.3 ms  [B] ... after 522 ms -> ERROR 23514 daily limit: spent 4800 + 800 > 5000
+   1361.8 ms  [B] refused -> ROLLBACK, nothing charged
+   result: 1 of 2 accepted, spent today = $48.00  -> correct
+
+== Run 4: sum, then insert                     (SERIALIZABLE)
+   spent today $40.00 (2 earlier purchases), limit $50.00, two $8.00 purchases at once
+   1371.6 ms  [A] BEGIN (SERIALIZABLE)
+   1371.9 ms  [B] BEGIN (SERIALIZABLE)
+   1373.3 ms  [A] SELECT sum(today) -> $40.00
+   1374.1 ms  [B] SELECT sum(today) -> $40.00
+   1374.1 ms  [A] spent today $40.00 + $8.00 = $48.00 -> OK
+   1375.2 ms  [A] INSERT purchase $8.00
+   1376.9 ms  [A] COMMIT -> purchase accepted
+   1376.9 ms  [B] spent today $40.00 + $8.00 = $48.00 -> OK
+   1377.9 ms  [B] INSERT purchase $8.00
+   1380.5 ms  [B] ERROR 40001 restart transaction
+   1380.8 ms  [B] ROLLBACK; retrying the whole purchase
+   1381.2 ms  [B] BEGIN (SERIALIZABLE)
+   1382.6 ms  [B] SELECT sum(today) -> $48.00
+   1382.6 ms  [B] spent today $48.00 + $8.00 = $56.00 -> over the limit
+   1383.1 ms  [B] refused -> ROLLBACK, nothing charged
+   result: 1 of 2 accepted, spent today = $48.00  -> correct
+
+== Summary (spent $40.00, limit $50.00, two $8.00 purchases at once)
+   run  how                                                      accepted   spent  verdict
+   1    sum, then insert                     (READ COMMITTED)           2  $56.00  LIMIT BROKEN
+   2    sum with FOR UPDATE, then insert     (READ COMMITTED)           2  $56.00  LIMIT BROKEN
+   3    lock the player row first (procedure) (READ COMMITTED)          1  $48.00  correct
+   4    sum, then insert                     (SERIALIZABLE)             1  $48.00  correct
