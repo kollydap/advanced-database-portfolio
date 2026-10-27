@@ -1,0 +1,235 @@
+> SET DATABASE = squadfire;
+SET
+> CREATE INDEX IF NOT EXISTS purchase_spend_by_day ON purchase (payer_id, created_at)
+    STORING (status, total_cents) WHERE previous_id IS NULL;
+CREATE INDEX
+> EXPLAIN ANALYZE
+SELECT coalesce(sum(p.total_cents), 0) AS spent_cents
+FROM purchase p
+WHERE p.payer_id = '56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'
+  AND p.previous_id IS NULL
+  AND p.status = 'SUCCEEDED'
+  AND p.created_at >= '2026-10-26' AND p.created_at < '2026-10-27'
+  AND NOT EXISTS (SELECT 1 FROM purchase r WHERE r.previous_id = p.id);
+                                                                                                                                                                                                                                                                 info
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  planning time: 10ms
+  execution time: 8ms
+  distribution: local
+  vectorized: true
+  plan type: custom
+  rows decoded from KV: 3 (249 B, 3 gRPC calls)
+  cumulative time spent in KV: 7ms
+  maximum memory usage: 130 KiB
+  DistSQL network usage: 0 B (0 messages)
+  regions: eu-west, us-east
+  sql cpu time: 560µs
+  isolation level: serializable
+  priority: normal
+  quality of service: regular
+
+  • render
+  │
+  └── • group (scalar)
+      │ sql nodes: n1
+      │ regions: us-east
+      │ actual row count: 1
+      │ execution time: 116µs
+      │ sql cpu time: 117µs
+      │ estimated row count: 1
+      │
+      └── • lookup join (anti)
+          │ sql nodes: n1
+          │ kv nodes: n2
+          │ regions: eu-west, us-east
+          │ actual row count: 3
+          │ KV time: 2ms
+          │ KV rows decoded: 0
+          │ KV bytes read: 0 B
+          │ KV gRPC calls: 1
+          │ execution time: 2ms
+          │ estimated max memory allocated: 30 KiB
+          │ sql cpu time: 128µs
+          │ estimated row count: 0
+          │ table: purchase@purchase_previous_id_key
+          │ equality cols are key
+          │ lookup condition: (crdb_region IN ('af-west', 'eu-west')) AND (id = previous_id)
+          │
+          └── • lookup join (anti)
+              │ sql nodes: n1
+              │ kv nodes: n1
+              │ regions: us-east
+              │ actual row count: 3
+              │ KV time: 1ms
+              │ KV rows decoded: 0
+              │ KV bytes read: 0 B
+              │ KV gRPC calls: 1
+              │ execution time: 1ms
+              │ estimated max memory allocated: 30 KiB
+              │ sql cpu time: 212µs
+              │ estimated row count: 0
+              │ table: purchase@purchase_previous_id_key
+              │ equality cols are key
+              │ lookup condition: (crdb_region = 'us-east') AND (id = previous_id)
+              │
+              └── • filter
+                  │ sql nodes: n1
+                  │ regions: us-east
+                  │ actual row count: 3
+                  │ execution time: 13µs
+                  │ sql cpu time: 12µs
+                  │ estimated row count: 1
+                  │ filter: status = 'SUCCEEDED'
+                  │
+                  └── • render
+                      │
+                      └── • scan
+                            sql nodes: n1
+                            kv nodes: n1, n2
+                            regions: eu-west, us-east
+                            actual row count: 3
+                            KV time: 4ms
+                            KV rows decoded: 3
+                            KV bytes read: 249 B
+                            KV gRPC calls: 1
+                            estimated max memory allocated: 20 KiB
+                            sql cpu time: 90µs
+                            estimated row count: 0 (<0.01% of the table; stats collected 11 minutes ago)
+                            table: purchase@purchase_spend_by_day (partial index)
+                            spans: [/'af-west'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 00:00:00+00' - /'af-west'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 23:59:59.999999+00'] [/'eu-west'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 00:00:00+00' - /'eu-west'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 23:59:59.999999+00'] [/'us-east'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 00:00:00+00' - /'us-east'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 23:59:59.999999+00']
+(84 rows)
+> EXPLAIN ANALYZE
+SELECT coalesce(sum(p.total_cents), 0) AS spent_cents
+FROM purchase p
+WHERE p.crdb_region = 'us-east'
+  AND p.payer_id = '56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'
+  AND p.previous_id IS NULL
+  AND p.status = 'SUCCEEDED'
+  AND p.created_at >= '2026-10-26' AND p.created_at < '2026-10-27'
+  AND NOT EXISTS (SELECT 1 FROM purchase r WHERE r.previous_id = p.id);
+                                                                                                info
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  planning time: 4ms
+  execution time: 3ms
+  distribution: local
+  vectorized: true
+  plan type: custom
+  rows decoded from KV: 3 (249 B, 3 gRPC calls)
+  cumulative time spent in KV: 2ms
+  maximum memory usage: 130 KiB
+  DistSQL network usage: 0 B (0 messages)
+  regions: eu-west, us-east
+  sql cpu time: 263µs
+  isolation level: serializable
+  priority: normal
+  quality of service: regular
+
+  • render
+  │
+  └── • group (scalar)
+      │ sql nodes: n1
+      │ regions: us-east
+      │ actual row count: 1
+      │ execution time: 29µs
+      │ sql cpu time: 29µs
+      │ estimated row count: 1
+      │
+      └── • lookup join (anti)
+          │ sql nodes: n1
+          │ kv nodes: n2
+          │ regions: eu-west, us-east
+          │ actual row count: 3
+          │ KV time: 960µs
+          │ KV rows decoded: 0
+          │ KV bytes read: 0 B
+          │ KV gRPC calls: 1
+          │ execution time: 1ms
+          │ estimated max memory allocated: 30 KiB
+          │ sql cpu time: 83µs
+          │ estimated row count: 0
+          │ table: purchase@purchase_previous_id_key
+          │ equality cols are key
+          │ lookup condition: (crdb_region IN ('af-west', 'eu-west')) AND (id = previous_id)
+          │
+          └── • lookup join (anti)
+              │ sql nodes: n1
+              │ kv nodes: n1
+              │ regions: us-east
+              │ actual row count: 3
+              │ KV time: 529µs
+              │ KV rows decoded: 0
+              │ KV bytes read: 0 B
+              │ KV gRPC calls: 1
+              │ execution time: 631µs
+              │ estimated max memory allocated: 30 KiB
+              │ sql cpu time: 103µs
+              │ estimated row count: 0
+              │ table: purchase@purchase_previous_id_key
+              │ equality cols are key
+              │ lookup condition: (crdb_region = 'us-east') AND (id = previous_id)
+              │
+              └── • filter
+                  │ sql nodes: n1
+                  │ regions: us-east
+                  │ actual row count: 3
+                  │ execution time: 3µs
+                  │ sql cpu time: 2µs
+                  │ estimated row count: 1
+                  │ filter: status = 'SUCCEEDED'
+                  │
+                  └── • render
+                      │
+                      └── • scan
+                            sql nodes: n1
+                            kv nodes: n1
+                            regions: us-east
+                            actual row count: 3
+                            KV time: 383µs
+                            KV rows decoded: 3
+                            KV bytes read: 249 B
+                            KV gRPC calls: 1
+                            estimated max memory allocated: 20 KiB
+                            sql cpu time: 46µs
+                            estimated row count: 1 (<0.01% of the table; stats collected 11 minutes ago)
+                            table: purchase@purchase_spend_by_day (partial index)
+> EXPLAIN
+SELECT id, status, total_cents
+FROM purchase
+WHERE id = '12e08b3b-6b46-4890-af76-b4c2f0b61703';
+                            spans: [/'us-east'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 00:00:00+00' - /'us-east'/'56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'/'2026-10-26 23:59:59.999999+00']
+(84 rows)
+                                                                                                              info
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  distribution: local
+  vectorized: true
+
+  • union all
+  │ estimated row count: 1
+  │ limit: 1
+  │
+  ├── • scan
+  │     estimated row count: 1 (<0.01% of the table; stats collected 11 minutes ago)
+  │     table: purchase@purchase_pkey
+  │     spans: [/'us-east'/'12e08b3b-6b46-4890-af76-b4c2f0b61703' - /'us-east'/'12e08b3b-6b46-4890-af76-b4c2f0b61703']
+  │
+  └── • scan
+        estimated row count: 1 (<0.01% of the table; stats collected 11 minutes ago)
+        table: purchase@purchase_pkey
+        spans: [/'af-west'/'12e08b3b-6b46-4890-af76-b4c2f0b61703' - /'af-west'/'12e08b3b-6b46-4890-af76-b4c2f0b61703'] [/'eu-west'/'12e08b3b-6b46-4890-af76-b4c2f0b61703' - /'eu-west'/'12e08b3b-6b46-4890-af76-b4c2f0b61703']
+(16 rows)
+> SELECT
+  (SELECT sum(total_cents) FROM purchase p
+    WHERE payer_id = '56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'
+      AND previous_id IS NULL AND status = 'SUCCEEDED'
+      AND created_at >= '2026-10-26' AND created_at < '2026-10-27'
+      AND NOT EXISTS (SELECT 1 FROM purchase r WHERE r.previous_id = p.id)) AS any_region,
+  (SELECT sum(total_cents) FROM purchase p
+    WHERE crdb_region = 'us-east'
+      AND payer_id = '56f78d43-a6e5-4870-9a87-1c5d42c8ed9f'
+      AND previous_id IS NULL AND status = 'SUCCEEDED'
+      AND created_at >= '2026-10-26' AND created_at < '2026-10-27'
+      AND NOT EXISTS (SELECT 1 FROM purchase r WHERE r.previous_id = p.id)) AS us_east_only;
+  any_region | us_east_only
+-------------+---------------
+        4986 |         4986
+(1 row)
