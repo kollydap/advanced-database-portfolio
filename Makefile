@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3 p4-mongo
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -89,3 +89,11 @@ P3 := portfolio-3-transactions-concurrency
 p3:
 	@mkdir -p $(P3)/evidence
 	$(PY) $(P3)/scripts/$(EXP).py | tee $(P3)/evidence/$(EXP).txt
+
+# ---------------------------------------------------------------- portfolio 4
+P4 := portfolio-4-nosql
+# usage: make p4-mongo EXP=4.1_storefront_rules   (the storefront schema is passed in as SCHEMA)
+p4-mongo:
+	@mkdir -p $(P4)/evidence
+	$(COMPOSE) exec -T mongos mongosh --quiet squadfire --eval "const SCHEMA = $$(cat $(P4)/mongo/storefront.schema.json); $$(cat $(P4)/mongo/$(EXP).js)" > $(P4)/evidence/$(EXP).txt 2>&1
+	@cat $(P4)/evidence/$(EXP).txt

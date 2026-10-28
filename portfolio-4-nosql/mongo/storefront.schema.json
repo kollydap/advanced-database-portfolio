@@ -1,0 +1,56 @@
+{
+  "bsonType": "object",
+  "required": ["_id", "region", "sku", "name", "type", "units_per_pack", "price", "details"],
+  "properties": {
+    "region": { "enum": ["us-east", "eu-west", "af-west"] },
+    "sku": { "bsonType": "string", "pattern": "^[A-Z0-9-]+$" },
+    "name": { "bsonType": "string", "minLength": 1 },
+    "type": { "enum": ["AMMO", "GRENADE", "MEDKIT", "SKIN"] },
+    "units_per_pack": { "bsonType": ["int", "long"], "minimum": 1 },
+    "price": {
+      "bsonType": "object",
+      "required": ["cents", "currency"],
+      "properties": {
+        "cents": { "bsonType": ["int", "long"], "minimum": 1 },
+        "currency": { "enum": ["USD"] }
+      }
+    },
+    "details": { "bsonType": "object" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "enum": ["AMMO"] },
+        "details": {
+          "required": ["calibre", "damage", "penetration"],
+          "properties": {
+            "calibre": { "bsonType": "string" },
+            "damage": { "bsonType": ["int", "long"], "minimum": 1 },
+            "penetration": { "bsonType": ["int", "long"], "minimum": 0 }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": { "enum": ["GRENADE"] },
+        "details": { "anyOf": [{ "required": ["damage"] }, { "required": ["cloud_radius_m"] }] }
+      }
+    },
+    {
+      "properties": {
+        "type": { "enum": ["MEDKIT"] },
+        "details": { "required": ["heal"] }
+      }
+    },
+    {
+      "properties": {
+        "type": { "enum": ["SKIN"] },
+        "details": {
+          "required": ["weapon", "rarity"],
+          "properties": { "rarity": { "enum": ["RARE", "EPIC", "LEGENDARY"] } }
+        }
+      }
+    }
+  ]
+}

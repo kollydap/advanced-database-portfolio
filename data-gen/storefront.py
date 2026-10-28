@@ -10,11 +10,15 @@ that region's shard (the shards are tagged with zones by infra/mongo).
     python data-gen/storefront.py          # after make seed; replaces the collection
 """
 import argparse
+import json
+from pathlib import Path
 
 import psycopg
 from pymongo import MongoClient
 from bson.min_key import MinKey
 from bson.max_key import MaxKey
+
+SCHEMA = Path(__file__).parent.parent / "portfolio-4-nosql" / "mongo" / "storefront.schema.json"
 
 # Details that only make sense for some item types: no empty columns needed.
 DETAILS = {
@@ -58,6 +62,9 @@ def main():
     client = MongoClient(args.mongo)
     db = client.squadfire
     db.storefront.drop()
+    # the type-specific rules every document must follow (portfolio 4.1)
+    db.create_collection("storefront", validator={"$jsonSchema": json.loads(SCHEMA.read_text())},
+                         validationLevel="strict", validationAction="error")
     # Zones first, then shard the empty collection: MongoDB creates one chunk
     # per region directly on that region's shard, so nothing has to migrate.
     # The zones cover the whole key space with no gaps (af-west from MinKey,

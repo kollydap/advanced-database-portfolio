@@ -1,0 +1,35 @@
+## Validator: level=strict, action=error, types=AMMO/GRENADE/MEDKIT/SKIN
+   existing documents: 33, breaking the rules: 0
+
+## Rule tests
+T1  valid new skin (extra field 'tradable' allowed)
+    expected accept, got accept  OK
+T2  ammo without a calibre
+    expected reject, got reject (code 121: missing calibre)  OK
+T3  skin with rarity 'SUPER'
+    expected reject, got reject (code 121: rarity = "SUPER" fails enum)  OK
+T4  negative price
+    expected reject, got reject (code 121: cents = -500 fails minimum)  OK
+T5  unknown region 'ng-lagos'
+    expected reject, got reject (code 121: region = "ng-lagos" fails enum)  OK
+T6  update: remove calibre from 7.62 rounds
+    expected reject, got reject (code 121: missing calibre)  OK
+T7  update: turn 7.62 rounds into a SKIN
+    expected reject, got reject (code 121: missing rarity, weapon)  OK
+T8  update: af-west 7.62 price to $1.29
+    expected accept, got accept  OK
+
+   8 of 8 as expected
+
+## Aggregation: price per region, af-west vs us-east
+   AMMO     12 Gauge Shells (40)           us-east  1.79  eu-west  1.58  af-west  0.86  af-west 52% cheaper
+   AMMO     5.56 mm Rounds (120)           us-east  1.99  eu-west  2.19  af-west  1.19  af-west 40% cheaper
+   AMMO     7.62 mm Rounds (90)            us-east  2.49  eu-west  2.74  af-west  1.49  af-west 40% cheaper
+   AMMO     9 mm Rounds (150)              us-east  1.49  eu-west  1.48  af-west  0.89  af-west 40% cheaper
+   AMMO     Armour-Piercing 5.56 mm (60)   us-east  3.99  eu-west  4.39  af-west  2.39  af-west 40% cheaper
+   GRENADE  Frag Grenades (3)              us-east  2.99  eu-west  3.29  af-west  1.79  af-west 40% cheaper
+   GRENADE  Smoke Grenades (3)             us-east  1.99  eu-west  2.19  af-west  1.49  af-west 25% cheaper
+   MEDKIT   Med Kits (5)                   us-east  2.49  eu-west  2.74  af-west  1.49  af-west 40% cheaper
+   SKIN     Arctic M4 skin                 us-east  6.99  eu-west  7.69  af-west  6.55  af-west 6% cheaper
+   SKIN     Gold Desert Eagle skin         us-east  9.99  eu-west 13.74  af-west  5.99  af-west 40% cheaper
+   SKIN     Tiger Stripe AK skin           us-east  4.99  eu-west  5.49  af-west  3.29  af-west 34% cheaper
