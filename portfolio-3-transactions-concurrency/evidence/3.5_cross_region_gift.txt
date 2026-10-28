@@ -1,0 +1,30 @@
+== Setup
+   payer BoldCobra432 (eu-west), friends WildRanger615 (eu-west) and FrostRanger658 (af-west)
+   gateway node region: eu-west
+   placement ready after 11 s:
+     lab_gift_purchase    eu-west  rows -> leaseholder n2 (region=eu-west)
+     lab_gift_purchase    af-west  rows -> leaseholder n3 (region=af-west)
+     lab_gift_inventory   eu-west  rows -> leaseholder n2 (region=eu-west)
+     lab_gift_inventory   af-west  rows -> leaseholder n3 (region=af-west)
+
+== Run 1: local gift, BoldCobra432 (eu-west) -> WildRanger615 (eu-west)
+   writes and commit, as the gateway sent them:
+     lab_gift_purchase    r1867  1 CPut                 -> n2 (region=eu-west)
+     lab_gift_inventory   r1873  1 CPut                 -> n2 (region=eu-west)
+     lab_gift_purchase    r1867  1 EndTxn               -> n2 (region=eu-west)
+
+== Run 2: cross-region gift, BoldCobra432 (eu-west) -> FrostRanger658 (af-west)
+   writes and commit, as the gateway sent them:
+     lab_gift_purchase    r1867  1 CPut                 -> n2 (region=eu-west)
+     lab_gift_inventory   r1871  1 CPut                 -> n3 (region=af-west)
+     lab_gift_purchase    r1867  1 EndTxn               -> n2 (region=eu-west)
+
+== Run 3: cross-region gift, the af-west ammo write fails
+   eu-west purchase written (provisional); visible inside the transaction: 1 row
+   af-west ammo write rejected: ERROR 23514 failed to satisfy CHECK constraint (change > 0:::INT8)
+   after ROLLBACK: purchase rows in eu-west = 0, ammo rows in af-west = 0  -> nothing kept, as required
+
+== Timing: 20 gifts each, through the eu-west node
+   local (eu-west -> eu-west)         median   3.8 ms   p90   6.2 ms
+   cross-region (eu-west -> af-west)  median   4.2 ms   p90   5.6 ms
+   every gift complete: 42 purchases, 42 ammo credits
