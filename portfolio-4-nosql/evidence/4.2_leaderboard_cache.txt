@@ -1,0 +1,49 @@
+== Part 1: leaderboards (sorted sets)
+   sf:{us-east}:kills    1787 players  (encoding skiplist, 150 KiB)
+   sf:{eu-west}:kills    1647 players  (encoding skiplist, 150 KiB)
+   sf:{af-west}:kills    1203 players  (encoding skiplist, 105 KiB)
+
+   top 10 in af-west: ZREVRANGE sf:{af-west}:kills 0 9 WITHSCORES
+      1. BoldKestrel823         43 kills
+      2. SilentBadger768        34 kills
+      3. SandyRanger831         33 kills
+      4. SilentLion986          32 kills
+      5. SteelEagle401          30 kills
+      6. RogueBadger460         30 kills
+      7. QuietHyena834          30 kills
+      8. GrimPanther744         30 kills
+      9. GrimMamba260           29 kills
+     10. QuietSniper322         28 kills
+   same as CockroachDB's top 10: True
+
+   "what's my rank?" for BoldFox551 (23 kills, tied with 7 others):
+     ZREVRANK (position in the list, ties alphabetical)  -> #42
+     ZCOUNT (23 +inf, players with more kills, + 1)   -> #35
+     CockroachDB (count players with more kills, + 1)   -> #35   same: True
+
+   timing, 50 runs each (median / p95):
+     top 10, CockroachDB (sum + sort)           11.09 ms /   34.73 ms
+     top 10, Redis ZREVRANGE                     0.56 ms /    3.53 ms
+     my rank, CockroachDB (count above me)      18.10 ms /   33.10 ms
+     my rank, Redis ZCOUNT                       0.30 ms /    0.41 ms
+
+   live update: ZINCRBY sf:{af-west}:kills 16 NightFox371
+     NightFox371: #11 with 28 kills -> #1 with 44 kills (no re-sorting needed)
+
+   worldwide board: ZUNIONSTORE sf:global:kills 3 <three regional boards>  (4637 players)
+     1. SilentBadger14         44 kills
+     2. BoldKestrel823         43 kills
+     3. CrimsonHarmattan115    41 kills
+     4. NightCobra387          38 kills
+     5. StormRanger130         37 kills
+
+== Part 2: cache-aside for the af-west shop page
+   200 page loads each (median / p95):
+     straight from MongoDB              0.98 ms /   2.24 ms
+     through the Redis cache            0.30 ms /   0.66 ms
+     hits 199, misses 1 -> hit ratio 99.5%; key expires in 60 s (TTL 60 s)
+
+   freshness: change the af-west 7.62 price in MongoDB from $1.49 to $1.39
+     page through the cache  -> $1.49   (stale: the cached copy)
+     DEL sf:{af-west}:storefront   (invalidate)
+     page through the cache  -> $1.39   (miss, fresh from MongoDB)

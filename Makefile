@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3 p4-mongo
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3 p4-mongo p4
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -97,3 +97,8 @@ p4-mongo:
 	@mkdir -p $(P4)/evidence
 	$(COMPOSE) exec -T mongos mongosh --quiet squadfire --eval "const SCHEMA = $$(cat $(P4)/mongo/storefront.schema.json); $$(cat $(P4)/mongo/$(EXP).js)" > $(P4)/evidence/$(EXP).txt 2>&1
 	@cat $(P4)/evidence/$(EXP).txt
+
+# usage: make p4 EXP=4.2_leaderboard_cache   (Python scripts in redis/ or neo4j/)
+p4:
+	@mkdir -p $(P4)/evidence
+	$(PY) $$(ls $(P4)/*/$(EXP).py) | tee $(P4)/evidence/$(EXP).txt
