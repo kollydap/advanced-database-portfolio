@@ -1,0 +1,89 @@
+== Load from CockroachDB (6.8 s)
+   5,000 players, 9,867 accepted friendships, 4,877 gift pairs (8,262 gifts)
+
+   check:
+   MATCH (p:Player) WITH count(p) AS players
+   MATCH ()-[f:FRIENDS_WITH]->() WITH players, count(f) AS friends_with
+   MATCH ()-[g:GIFTED]->() RETURN players, friends_with, count(g) AS gifted
+     players, friends_with, gifted
+     5000, 9867, 4877
+
+== Question 1: people you may know
+   player: BoldFalcon857 (the player with the strongest suggestion in the graph)
+
+   Cypher:
+   MATCH (me:Player {handle: "BoldFalcon857"})-[:FRIENDS_WITH]-(friend)-[:FRIENDS_WITH]-(suggestion)
+   WHERE suggestion <> me AND NOT (me)-[:FRIENDS_WITH]-(suggestion)
+   RETURN suggestion.handle AS suggestion, suggestion.region AS region,
+          count(DISTINCT friend) AS mutual, collect(DISTINCT friend.handle) AS through
+   ORDER BY mutual DESC, suggestion LIMIT 5
+     suggestion, region, mutual, through
+     "RogueBison907", "us-east", 2, ["GrimBison936", "GrimSniper548"]
+     "CrimsonFalcon326", "af-west", 1, ["SilentHarmattan630"]
+     "CrimsonRanger97", "us-east", 1, ["GrimSniper548"]
+     "DustyFox890", "us-east", 1, ["DustyHarmattan123"]
+     "DustyPanther391", "us-east", 1, ["GrimSniper548"]
+
+   the same question in SQL (friendship joined with itself, both directions):
+   WITH f AS (SELECT player_low AS a, player_high AS b FROM current_friendship WHERE status = 'ACCEPTED'
+              UNION ALL
+              SELECT player_high, player_low FROM current_friendship WHERE status = 'ACCEPTED')
+   SELECT s.handle, count(DISTINCT f1.b) AS mutual
+   FROM f f1 JOIN f f2 ON f2.a = f1.b JOIN current_player s ON s.player_id = f2.b
+   JOIN current_player me ON me.player_id = f1.a
+   WHERE me.handle = %s AND f2.b <> f1.a
+     AND NOT EXISTS (SELECT 1 FROM f f3 WHERE f3.a = f1.a AND f3.b = f2.b)
+   GROUP BY s.handle ORDER BY mutual DESC, s.handle LIMIT 5
+     RogueBison907        2
+     CrimsonFalcon326     1
+     CrimsonRanger97      1
+     DustyFox890          1
+     DustyPanther391      1
+
+   time, median of 9 runs (server side for Neo4j, client side for SQL):
+     Neo4j           1.0 ms
+     CockroachDB   456.9 ms
+
+== Question 2: gift farming
+   rule: feeders who never play, have exactly one friend, and gift only to that friend;
+         flag a receiver with 3 or more such feeders
+
+   on the real data:
+   MATCH (feeder:Player)-[g:GIFTED]->(receiver:Player)
+   WHERE feeder.matches = 0
+     AND COUNT { (feeder)-[:FRIENDS_WITH]-() } = 1
+     AND COUNT { (feeder)-[:GIFTED]->() } = 1
+   WITH receiver, collect(feeder.handle) AS feeders, sum(g.count) AS gifts, sum(g.total_cents) AS cents
+   WHERE size(feeders) >= 3
+   RETURN receiver.handle AS receiver, size(feeders) AS feeders_n, gifts, cents, feeders
+     (no rows)
+
+   plant a labelled test ring (Neo4j only): 5 feeders -> RingBoss_TEST
+
+   same rule, with the test ring:
+   MATCH (feeder:Player)-[g:GIFTED]->(receiver:Player)
+   WHERE feeder.matches = 0
+     AND COUNT { (feeder)-[:FRIENDS_WITH]-() } = 1
+     AND COUNT { (feeder)-[:GIFTED]->() } = 1
+   WITH receiver, collect(feeder.handle) AS feeders, sum(g.count) AS gifts, sum(g.total_cents) AS cents
+   WHERE size(feeders) >= 3
+   RETURN receiver.handle AS receiver, size(feeders) AS feeders_n, gifts, cents, feeders
+     receiver, feeders_n, gifts, cents, feeders
+     "RingBoss_TEST", 5, 15, 4485, ["RingFeeder1_TEST", "RingFeeder2_TEST", "RingFeeder3_TEST", "RingFeeder4_TEST", "RingFeeder5_TEST"]
+
+   test ring removed
+
+   bonus: three-way gift loops (A -> B -> C -> A), each loop counted once
+   MATCH (a:Player)-[:GIFTED]->(b:Player)-[:GIFTED]->(c:Player)-[:GIFTED]->(a)
+   WHERE a.id < b.id AND a.id < c.id
+   RETURN a.handle AS a, b.handle AS b, c.handle AS c LIMIT 5
+     (no rows)
+
+   loops in total, and pairs who gift each other:
+   MATCH (a:Player)-[:GIFTED]->(b:Player)-[:GIFTED]->(c:Player)-[:GIFTED]->(a)
+   WHERE a.id < b.id AND a.id < c.id
+   WITH count(*) AS three_way_loops
+   MATCH (x:Player)-[:GIFTED]->(y:Player)-[:GIFTED]->(x) WHERE x.id < y.id
+   RETURN three_way_loops, count(*) AS mutual_gift_pairs
+     three_way_loops, mutual_gift_pairs
+     0, 749
