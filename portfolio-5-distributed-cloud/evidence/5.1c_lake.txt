@@ -1,0 +1,25 @@
+:: loading settings :: url = jar:file:/opt/spark/jars/ivy-2.5.1.jar!/org/apache/ivy/core/settings/ivysettings.xml
+== bronze: Kafka messages as they arrived
+   inventory          94,976
+   item                  109
+   purchase           47,526
+   purchase_line      66,659
+   region                 51
+   telemetry         433,978
+
+== silver: typed, de-duplicated, partitioned
+   purchase           47,430 received ->    47,430 rows   partitioned by crdb_region, dt
+   purchase_line      66,563 received ->    66,563 rows   partitioned by crdb_region
+   inventory          94,880 received ->    94,880 rows   partitioned by crdb_region, dt
+   item                   13 received ->        11 rows   partitioned by -
+   region                  3 received ->         3 rows   partitioned by -
+   telemetry         433,978 events                    partitioned by region, dt
+
+== gold: star schema and daily summaries
+   fact_sales          64,536 rows
+   dim_date                31 rows
+   dim_item                11 rows
+   dim_region               3 rows
+   daily_sales          1,023 rows
+   daily_fired            641 rows
+   daily_events         1,021 rows

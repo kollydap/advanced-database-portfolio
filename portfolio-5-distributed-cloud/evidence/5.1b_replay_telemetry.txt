@@ -1,0 +1,12 @@
+== Replayed 433,978 events into squadfire.telemetry in 2.1 s
+   store_view        89,942
+   shot_fired        80,888
+   hit               71,737
+   store_click       66,563
+   kill              50,524
+   session_start     21,392
+   session_end       21,392
+   assist            20,355
+   revive             6,185
+   match_started      2,500
+   match_ended        2,500

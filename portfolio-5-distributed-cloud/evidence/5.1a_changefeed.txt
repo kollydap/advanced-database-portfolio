@@ -1,0 +1,20 @@
+== 1. The changefeed job
+   job 1222636338712641537: running
+   CREATE CHANGEFEED FOR TABLE purchase, TABLE purchase_line, TABLE inventory, TABLE item INTO 'kafka://kafka:9092?topic_prefix=squadfire.' WITH OPTIONS (format = 'json', initial_scan = 'yes', resolved = '10s', updated)
+   high-water mark (everything up to here is in Kafka): 0:00:31.297181 behind now
+
+== 2. Completeness: Kafka vs CockroachDB
+   topic                       row msgs  distinct keys  resolved  table rows  match
+   squadfire.purchase            47,430         47,430         9      47,430  True
+   squadfire.purchase_line       66,563         66,563         9      66,563  True
+   squadfire.inventory           94,880         94,880        12      94,880  True
+   squadfire.item                    11             11        12          11  True
+   (row messages can exceed distinct keys when a row changed after the initial scan;
+    for the history tables every row is written once, so the two are equal)
+
+== 3. A live change: SKIN-GOLD-DEAGLE
+   UPDATE item SET active = false  (commit 617 ms)
+     -> squadfire.item partition 1 offset 10, 392 ms after commit: active=false, updated=1793189519884242798
+   UPDATE item SET active = true  (commit 634 ms)
+     -> squadfire.item partition 1 offset 11, 783 ms after commit: active=true, updated=1793189521492248591
+   the item is back to active; both versions stay in Kafka, so the lake keeps the history

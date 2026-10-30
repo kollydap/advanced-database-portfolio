@@ -1,0 +1,54 @@
+== 1. Copy the gold layer out of HDFS
+   hdfs dfs -get /lake/gold -> warehouse/staging/gold: 7 Parquet files, 2,412 KiB
+
+== 2. Load the star schema into DuckDB (warehouse/squadfire.duckdb)
+   dim_date               31 rows   (date_key, date, year, month, weekday, is_weekend)
+   dim_item               11 rows   (sku, name, item_type, units_per_pack, consumable, active)
+   dim_region              3 rows   (region, name)
+   fact_sales         64,536 rows   (date_key, region, sku, purchase_id, payer_id, recipient_id, is_gift, is_limited_drop, refunded, packs, line_total_cents, net_cents)
+   daily_sales         1,023 rows   (date_key, region, sku, packs, gross_cents, net_cents)
+   daily_fired           641 rows   (date_key, region, sku, shots, rounds)
+   daily_events        1,021 rows   (date_key, region, event, events)
+   fact rows without a matching dimension (date, item, region): (0, 0, 0)
+
+== 3. Reconcile with CockroachDB
+   sales (succeeded purchases; net = minus refunds):
+   region    packs (DW)    (CRDB)      net (DW)        (CRDB)  match
+   af-west       40,022    40,022    $60,070.68    $60,070.68   True
+   eu-west       48,532    48,532   $130,436.68   $130,436.68   True
+   us-east       50,516    50,516   $125,486.94   $125,486.94   True
+
+   items used in matches, two independent paths into the lake:
+   telemetry (game servers -> Kafka) vs USED inventory rows (CockroachDB -> changefeed)
+   region    rounds fired  ammo+gren.  revives  med kits  match
+   af-west        818,316     818,316    1,545     1,545   True
+   eu-west      1,155,322   1,155,322    2,220     2,220   True
+   us-east      1,233,500   1,233,500    2,420     2,420   True
+
+== 4. Manager questions (star joins)
+
+   a. Best seller per region by net revenue
+   region                                   best seller         net   share
+   EU West (Ireland)       Armour-Piercing 5.56 mm (60)  $29,475.62     23%
+   US East (Virginia)      Armour-Piercing 5.56 mm (60)  $28,937.48     23%
+   Africa West (Lagos)     Armour-Piercing 5.56 mm (60)  $13,970.53     23%
+
+   b. Gifts and limited drops as a share of net revenue
+   region                          net   gifts   drops
+   EU West (Ireland)       $130,436.68   19.3%    0.9%
+   US East (Virginia)      $125,486.94   18.8%    0.9%
+   Africa West (Lagos)      $60,070.68   17.8%    2.0%
+
+   c. Average net revenue per day: weekdays vs weekends
+   region                    weekday    weekend
+   Africa West (Lagos)     $1,993.47  $1,820.78
+   EU West (Ireland)       $4,266.36  $4,084.31
+   US East (Virginia)      $4,171.49  $3,788.57
+
+   d. Ammo bought vs fired per calibre (packs x rounds per pack, vs rounds fired)
+   ammo                             bought      fired   used
+   12 Gauge Shells (40)            823,840    360,986    44%
+   5.56 mm Rounds (120)          2,399,520    778,133    32%
+   7.62 mm Rounds (90)           1,808,460    662,587    37%
+   9 mm Rounds (150)             3,152,850    893,619    28%
+   Armour-Piercing 5.56 mm (60)  1,196,220    500,513    42%

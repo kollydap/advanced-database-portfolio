@@ -2,7 +2,7 @@ PY      := .venv/bin/python
 COMPOSE := docker compose
 ALL     := --profile core --profile stream --profile bigdata
 
-.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3 p4-mongo p4
+.PHONY: venv up-core up-stream up-bigdata down status sql mongo redis neo4j p1-build p1-tests seed p1-integrity storefront p2 p2-mongo p3 p4-mongo p4 p5 p5-changefeed p5-lake
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -102,3 +102,24 @@ p4-mongo:
 p4:
 	@mkdir -p $(P4)/evidence
 	$(PY) $$(ls $(P4)/*/$(EXP).py) | tee $(P4)/evidence/$(EXP).txt
+
+# ---------------------------------------------------------------- portfolio 5
+P5 := portfolio-5-distributed-cloud
+# usage: make p5 EXP=5.1a_changefeed
+p5:
+	@mkdir -p $(P5)/evidence
+	$(PY) $(P5)/scripts/$(EXP).py | tee $(P5)/evidence/$(EXP).txt
+
+# once, after make seed + make up-stream: CockroachDB -> Kafka
+p5-changefeed:
+	$(CRDB) < $(P5)/sql/changefeed.sql
+
+# Kafka -> HDFS bronze/silver/gold; Spark downloads its official Kafka source on first run
+SPARK_KAFKA := org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.6
+p5-lake:
+	@mkdir -p $(P5)/evidence
+	$(COMPOSE) exec -T spark-master /opt/spark/bin/spark-submit \
+	  --master spark://spark-master:7077 --packages $(SPARK_KAFKA) \
+	  --conf spark.jars.ivy=/tmp/.ivy2 --conf spark.driver.host=spark-master \
+	  --conf spark.sql.session.timeZone=UTC --conf spark.executor.memory=1g \
+	  /jobs/lake.py 2> $(P5)/evidence/5.1c_lake.spark.log | tee $(P5)/evidence/5.1c_lake.txt
