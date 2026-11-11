@@ -22,6 +22,7 @@ stuck game server inside the cut-off master's own container.
 """
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,8 +55,20 @@ def sentinel(*args, service="sentinel-1"):
     return on(service, "SENTINEL", *args, port=26379)
 
 
+def name(addr):
+    """A sentinel may report a node by IP; show (and use) its service name."""
+    ips = {sh("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+              container(n)): n for n in NODES}
+    return ips.get(addr, addr)
+
+
 def master(service="sentinel-1"):
-    return sentinel("get-master-addr-by-name", MASTER_NAME, service=service).splitlines()[0]
+    return name(sentinel("get-master-addr-by-name", MASTER_NAME, service=service).splitlines()[0])
+
+
+def sentinel_replicas(service):
+    out = sentinel("replicas", MASTER_NAME, service=service).splitlines()
+    return sorted(out[i + 1] for i, k in enumerate(out) if k == "ip")
 
 
 def role(service):
@@ -107,6 +120,17 @@ def stuck_writes(service, prefix, n, gap=0.1):
     return ok, refused, first
 
 
+def split_and_write(service, prefix, n=100):
+    """Cut `service` off, keep the stuck game server writing, and time the sentinels' promotion meanwhile."""
+    partition(service)
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(1) as pool:
+        writes = pool.submit(stuck_writes, service, prefix, n)
+        wait(lambda: master() != service, "a new master")
+        promoted = time.monotonic() - t0
+        return (*writes.result(), master(), promoted)
+
+
 def announce(service):
     # By hostname, not IP: a node reconnected after a split gets a new IP, and sentinels that only
     # knew the old IP never find it again (what happened on this script's first run)
@@ -119,6 +143,11 @@ def main():
     m = master()
     if m != "redis-master":
         raise SystemExit(f"expected redis-master as master, sentinels say {m}")
+    # forget stale entries (a node once known by an IP it no longer has) and rediscover by hostname
+    for s in SENTINELS:
+        sentinel("reset", MASTER_NAME, service=s)
+    want = sorted(n for n in NODES if n != m)
+    wait(lambda: all(sentinel_replicas(s) == want for s in SENTINELS), "sentinels to rediscover the replicas")
     on(m, "EVAL", "for _, k in ipairs(redis.call('KEYS', ARGV[1])) do redis.call('DEL', k) end", "0", "lab:*")
 
     print("== 1. Before")
@@ -134,15 +163,11 @@ def main():
     # ------------------------------------------------------------------ 2
     print("\n== 2. Partition: redis-master is cut off from the replicas, the sentinels and the app")
     old = m
-    partition(old)
-    t0 = time.monotonic()
-    ok, refused, _ = stuck_writes(old, "lab:split", 30)
-    print(f"   game server on the master's side: {ok} of 30 writes answered OK, {refused} refused")
+    ok, refused, _, new, promoted = split_and_write(old, "lab:split")
+    print(f"   sentinels promoted {new} {promoted:.1f} s after the split (5 s down-after, then vote and promotion)")
+    print(f"   meanwhile the game server on the old master's side wrote for ~20 s:"
+          f" {ok} of 100 writes answered OK, {refused} refused")
     print(f"   (redis-master cannot tell it was cut off; it still says role: {role(old)})")
-    wait(lambda: master() != old, "a new master")
-    new = master()
-    print(f"   sentinels promoted {new} {time.monotonic() - t0:.1f} s after the split "
-          "(5 s down-after, then vote and promotion)")
     for s in SENTINELS:
         print(f"     {s} says master is {master(s)}")
     main_ok = sum(app(master(), "SET", f"lab:main:{i}", "kills=1") == "OK" for i in range(20))
@@ -164,15 +189,11 @@ def main():
     for n in NODES:
         on(n, "CONFIG", "SET", "min-replicas-to-write", "1")
         on(n, "CONFIG", "SET", "min-replicas-max-lag", "3")
-    partition(new)
-    t0 = time.monotonic()
-    ok2, refused2, first = stuck_writes(new, "lab:fixed", 100)
+    ok2, refused2, first, third, promoted = split_and_write(new, "lab:fixed")
+    print(f"   sentinels promoted {third} {promoted:.1f} s after the split")
     print(f"   game server on {new}'s side: {ok2} of 100 writes OK, {refused2} refused")
     if first:
         print(f"   first refusal {first[0]:.1f} s after the split: {first[1]}")
-    wait(lambda: master() != new, "a new master")
-    third = master()
-    print(f"   sentinels promoted {third}")
     heal(new)
     wait(lambda: synced_replica(new, third), f"{new} to rejoin as a replica")
     kept2 = nkeys(third, "lab:fixed:*")

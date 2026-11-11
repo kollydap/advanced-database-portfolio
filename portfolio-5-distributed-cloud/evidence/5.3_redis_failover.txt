@@ -1,0 +1,34 @@
+== 1. Before
+   master redis-master, replicas redis-replica-2, redis-replica-1
+   sentinel-1: squadfire-master -> redis-master, quorum 2, down-after 5 s, 2 other sentinels
+   sentinel-2: squadfire-master -> redis-master, quorum 2, down-after 5 s, 2 other sentinels
+   sentinel-3: squadfire-master -> redis-master, quorum 2, down-after 5 s, 2 other sentinels
+   app: SET lab:before -> OK (the master answers before the replicas have it: asynchronous)
+   WAIT 2 1000 -> 2 replicas confirm they have everything written so far
+
+== 2. Partition: redis-master is cut off from the replicas, the sentinels and the app
+   sentinels promoted redis-replica-1 6.7 s after the split (5 s down-after, then vote and promotion)
+   meanwhile the game server on the old master's side wrote for ~20 s: 100 of 100 writes answered OK, 0 refused
+   (redis-master cannot tell it was cut off; it still says role: master)
+     sentinel-1 says master is redis-replica-1
+     sentinel-2 says master is redis-replica-1
+     sentinel-3 says master is redis-replica-1
+   the app asks a sentinel for the master and writes there: 20 of 20 OK on redis-replica-1
+
+== 3. Heal the partition
+   sentinels turned redis-master into a replica of redis-replica-1 after 15.8 s; it resynced from redis-replica-1
+   of the 100 writes the old master said OK to: 0 on redis-replica-1, 0 on redis-master
+   -> 100 acknowledged writes LOST (the old master threw its copy away to match redis-replica-1)
+   the app's 20 writes after the failover: 20 kept
+
+== 4. The fix: min-replicas-to-write 1, min-replicas-max-lag 3 (on every node), split again
+   sentinels promoted redis-master 6.8 s after the split
+   game server on redis-replica-1's side: 23 of 100 writes OK, 77 refused
+   first refusal 4.1 s after the split: NOREPLICAS Not enough good replicas to write.
+   after healing: 23 acknowledged writes lost (before the fix: 100, and it would have kept growing with a longer split)
+   the loss is now bounded by the max lag (~3 s of writes), not by how long the split lasts;
+   it cannot be zero: Redis has no majority commit, so money stays in CockroachDB
+
+== 5. Restore redis-master as master
+   master redis-master, replicas redis-replica-2, redis-replica-1
+   lab keys removed
