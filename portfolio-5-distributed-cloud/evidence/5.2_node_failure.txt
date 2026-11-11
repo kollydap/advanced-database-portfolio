@@ -1,0 +1,46 @@
+== Setup: the cluster, through the us-east node
+   n1 us-east: live   n2 eu-west: live   n3 af-west: live
+   lab_order: one range per region, each with a replica on every node
+     us-east  rows  range r1909 replicas [1, 2, 3]  leaseholder n1 (us-east)
+     eu-west  rows  range r1907 replicas [1, 2, 3]  leaseholder n2 (eu-west)
+     af-west  rows  range r1905 replicas [1, 2, 3]  leaseholder n3 (af-west)
+   5 orders written per region before the crash: {'af-west': 5, 'eu-west': 5, 'us-east': 5}
+   under-replicated ranges: 0, unavailable ranges: 0
+
+== Part A, step 2: kill the af-west node (SIGKILL) and write an af-west order at once
+   attempt 1: committed
+   the first af-west order was safely in after 3.4 s
+   (its leaseholder was gone: the survivors waited out its lease, then n1/n2 took over)
+   af-west rows now led by n1 (us-east)
+   n3 marked not live after 6 s:
+   n1 us-east: live   n2 eu-west: live   n3 af-west: DOWN
+
+== Part A, step 3: the store keeps working with af-west down (20 orders per region)
+   us-east  orders: all 20 committed, median   2.4 ms
+   eu-west  orders: all 20 committed, median   2.4 ms
+   af-west  orders: all 20 committed, median   2.5 ms
+   real af-west history still readable: 13,350 purchase rows
+   under-replicated ranges: 173 (each has 2 of 3 copies left), unavailable ranges: 0
+   with 3 nodes there is nowhere to make a third copy; with 5+ the cluster would
+   re-replicate after server.time_until_store_dead (5 min)
+   orders so far: {'af-west': 26, 'eu-west': 25, 'us-east': 25}
+
+== Part A, step 4: restart af-west and let it catch up
+   n3 live again after 2 s
+   under-replicated ranges back to 0 after 12 s more (Raft log catch-up)
+   read through the af-west node itself: {'af-west': 26, 'eu-west': 25, 'us-east': 25}
+   it has all 61 orders written while it was dead -> caught up
+
+== Part B: kill eu-west AND af-west; only us-east is left (1 of 3, no majority)
+   write a us-east order              no answer after 8.0 s: ERROR 57014 statement timeout
+   read us-east orders                no answer after 8.0 s: ERROR 57014 statement timeout
+   read the item catalogue (GLOBAL)   no answer after 8.0 s: ERROR 57014 statement timeout
+   the us-east node is up and accepts the connection, but cannot reach a majority,
+   so it refuses to guess: consistency over availability (CP)
+
+== Part B: restart both nodes
+   first write succeeded 2 s after restart
+   n1 us-east: live   n2 eu-west: live   n3 af-west: live
+   orders: {'af-west': 26, 'eu-west': 25, 'us-east': 26}
+   the order that timed out never committed
+   every order written before the outage is still there, none twice: True
