@@ -4,7 +4,7 @@ MIT 8103 Advanced Database Systems · 2026/2027 First Semester Continuous Assess
 
 Squadfire is a simulated squad shooter with an in-game store. Players in three regions (`us-east`, `eu-west`, `af-west`) buy ammo, grenades, med kits and skins in USD, for themselves or as gifts to friends. This repository builds its data platform on CockroachDB, MongoDB, Redis, Neo4j and a Kafka → Spark → HDFS → DuckDB pipeline. Every claim is backed by a script whose output is saved under `evidence/`.
 
-> **Status:** portfolios 1–4 and the 5.1 pipeline are complete. Still to do: 5.2 (CockroachDB node failure), 5.3 (Redis Sentinel failover), the portfolio 5 README and the final write-up. Design decisions D1–D17 are recorded in [`DECISIONS.md`](DECISIONS.md).
+> **Status:** portfolios 1–5 are complete. Still to do: the final write-up. Design decisions D1–D17 are recorded in [`DECISIONS.md`](DECISIONS.md).
 
 ## At a glance
 
@@ -124,7 +124,7 @@ The generator ([`data-gen/generate.py`](data-gen/generate.py)) simulates the mon
 
 §4.4 of that README compares which store fits which job.
 
-## 5. Distributed processing and the lake
+## 5. Distributed processing, failures and the cloud
 
 [`portfolio-5-distributed-cloud/`](portfolio-5-distributed-cloud/):
 
@@ -142,11 +142,27 @@ The generator ([`data-gen/generate.py`](data-gen/generate.py)) simulates the mon
 - Net revenue and packs per region match CockroachDB to the cent.
 - Rounds fired and revives from telemetry equal the ammo, grenades and med kits marked USED in the inventory chains. These are two independent paths into the lake.
 
+**Failures** ([`5.2`](portfolio-5-distributed-cloud/scripts/5.2_node_failure.py), [`5.3`](portfolio-5-distributed-cloud/scripts/5.3_redis_failover.py)):
+- **One CockroachDB node killed:**
+  - The first write to its rows waited 3.4 s for the lease to move. After that, 60 of 60 orders committed at ~2.5 ms.
+  - The node caught up on everything it missed within 12 s of restarting.
+- **Two CockroachDB nodes killed:** the last node refuses reads and writes (timeout) rather than risk a wrong answer (CP). Nothing was lost or duplicated.
+- **Redis master cut off by a partition:**
+  - Sentinels promoted a replica in 6.7 s.
+  - The old master kept saying OK to writes, and all **100 acknowledged writes were lost** when the split healed (asynchronous replication).
+  - With `min-replicas-to-write 1` it refused writes after 4.1 s, and 23 were lost.
+- **CAP/PACELC per store and a cloud deployment plan** are in §5.4 of the portfolio README.
+
 ## Operational findings
 
 - **Clock offset kills a node.** The af-west node stopped twice overnight with `clock synchronization error: this node is more than 400ms away from at least half of the known nodes`, most likely from the laptop sleeping. The cluster kept serving on 2 of 3 replicas, and the node caught up after a restart.
 - **Leaseholders move slowly.** Lease preferences are applied by a background scanner that visits each range about every 10 minutes. After an outage, or on a new table, leaders can sit in the wrong region. The experiments use `ALTER RANGE … RELOCATE LEASE` to apply the configured placement immediately.
 - **GLOBAL tables trade write latency for local reads.** An `UPDATE item` took ~620 ms to commit, compared with a few ms on regional tables.
+- **An error doesn't always mean "not done".**
+  - After a node crash, one write failed with `result is ambiguous` (40003).
+  - In another run, a write that timed out without a majority committed once the majority returned.
+  - Both mean the client must check by a unique id (the purchase's `gateway_ref`) before retrying, never blindly retry.
+- **Sentinels must know nodes by hostname.** A Redis node that rejoins after a partition gets a new IP. Sentinels that knew it by IP never found it again, and once promoted a stale entry. Fixed with `replica-announce-ip <hostname>` and `SENTINEL RESET`.
 
 ## Limitations
 
@@ -168,7 +184,7 @@ portfolio-1-database-design/          sql/ 00–05, erd.md, normalisation.md, ev
 portfolio-2-query-optimisation/       sql/ 2.1 2.3 2.5, mongo/ 2.6, evidence/
 portfolio-3-transactions-concurrency/ scripts/ 3.2 3.3 3.5, evidence/
 portfolio-4-nosql/                    mongo/ 4.1, redis/ 4.2, neo4j/ 4.3, evidence/
-portfolio-5-distributed-cloud/        sql/ changefeed, scripts/ 5.1a–d, spark/ lake.py, evidence/
+portfolio-5-distributed-cloud/        sql/ changefeed, scripts/ 5.1a–d 5.2 5.3, spark/ lake.py, evidence/
 docs/screenshots/                     ERD image
 ```
 
@@ -194,6 +210,8 @@ make p5 EXP=5.1a_changefeed
 make p5 EXP=5.1b_replay_telemetry         # once
 make p5-lake                              # Spark: bronze/silver/gold
 make p5 EXP=5.1d_warehouse                # DuckDB load + reconciliation
+make p5 EXP=5.2_node_failure              # kills and restarts CockroachDB nodes
+make p5 EXP=5.3_redis_failover            # partitions Redis, then restores redis-master
 ```
 
 | Service | Address |

@@ -40,7 +40,10 @@
 **3. Horizontal fragmentation by region.** Player-owned tables are `REGIONAL BY ROW`: each row lives in its owner's region, so af-west players are served from the af-west node.
 - Child rows follow their parent (derived fragmentation): a purchase's lines go with the purchase.
 - Small reference tables (`region`, `item`, `player_handle`) are `GLOBAL`: copied to every region for fast local reads.
-- The textbook fragments exist as views (`player_af_west`, …) and are proved in portfolio 5.
+- The textbook fragments exist as views (`player_af_west`, …). Evidence of the placement:
+    - the rule tests count the rows in each fragment
+    - [2.5](../portfolio-2-query-optimisation/) shows a query that names its region reading only that region's fragment
+    - [5.2](../portfolio-5-distributed-cloud/) shows each region's rows on its own range, with the leaseholder on that region's node
 
 ## Evidence
 
